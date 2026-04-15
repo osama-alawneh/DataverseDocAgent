@@ -18,6 +18,7 @@ bmad/
 *.bmad
 *.agent
 *.workflow
+
 _bmad-output/
 
 # AI state / memory files (ephemeral)
