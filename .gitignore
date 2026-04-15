@@ -14,7 +14,7 @@
 .cursor/
 
 # BMAD / agent workflow files
-bmad/
+_bmad/
 *.bmad
 *.agent
 *.workflow
