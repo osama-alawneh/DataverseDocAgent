@@ -10,12 +10,14 @@ namespace DataverseDocAgent.Api.Dataverse;
 /// Never logs, surfaces, or wraps credential values in any form.
 /// Inner exceptions are stripped to prevent SDK exception messages from leaking OAuth details.
 /// </summary>
-public sealed class DataverseConnectionFactory
+public sealed class DataverseConnectionFactory : IDataverseConnectionFactory
 {
     private const string SafeErrorMessage =
         "Failed to connect to Dataverse environment. Verify credentials and environment URL.";
 
-    public async Task<ServiceClient> ConnectAsync(EnvironmentCredentials credentials)
+    public async Task<ServiceClient> ConnectAsync(
+        EnvironmentCredentials credentials,
+        CancellationToken cancellationToken = default)
     {
         ServiceClient client;
 
@@ -42,7 +44,7 @@ public sealed class DataverseConnectionFactory
 
         try
         {
-            await client.ExecuteAsync(new WhoAmIRequest());
+            await client.ExecuteAsync(new WhoAmIRequest(), cancellationToken);
         }
         catch
         {

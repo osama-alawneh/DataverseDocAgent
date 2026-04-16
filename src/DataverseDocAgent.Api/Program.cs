@@ -1,8 +1,11 @@
-// DataverseDocAgent.Api — Production-ready API host (Story 2.1)
+// DataverseDocAgent.Api — Production-ready API host (Story 2.1, 2.2)
 // NFR-009 (HTTPS), NFR-014 (error handling), NFR-007 (logging), NFR-006 (health)
 
 using DataverseDocAgent.Api.Common;
+using DataverseDocAgent.Api.Dataverse;
+using DataverseDocAgent.Api.Features.SecurityCheck;
 using DataverseDocAgent.Api.Middleware;
+using Microsoft.AspNetCore.Mvc;
 using Serilog;
 using Serilog.Events;
 
@@ -19,8 +22,30 @@ builder.Host.UseSerilog((ctx, cfg) => cfg
     .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"));
 
 // Add services to the container
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        // NFR-014 — Model validation failures return StructuredErrorResponse, not ProblemDetails
+        options.InvalidModelStateResponseFactory = context =>
+        {
+            var firstError = context.ModelState.Values
+                .SelectMany(v => v.Errors)
+                .FirstOrDefault()?.ErrorMessage
+                ?? "One or more required fields are missing or invalid.";
+
+            return new BadRequestObjectResult(new StructuredErrorResponse
+            {
+                Error       = firstError,
+                Code        = "INVALID_REQUEST",
+                SafeToRetry = false,
+            });
+        };
+    });
 builder.Services.AddEndpointsApiExplorer();
+
+// F-029, F-030, F-031 — Permission checker services (Story 2.2)
+builder.Services.AddScoped<IDataverseConnectionFactory, DataverseConnectionFactory>();
+builder.Services.AddScoped<SecurityCheckService>();
 
 var app = builder.Build();
 

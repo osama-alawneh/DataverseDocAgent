@@ -68,3 +68,37 @@ Review date: 2026-04-15. Code state: commit `c77914f0558ea24592bdd601813b8a14e84
 Phase 1 is complete. The POC validates the full Anthropic SDK → tool call → Dataverse → Claude response pipeline. Credential values are not observable in any console output, exception message, or serialized payload.
 
 **Risk item (NFR-001):** The performance gate is conditional. The POC measures a single-tool loop (30–44 s). Full Mode 1 will call 8+ tool types, and linear scaling is unlikely to hold: token context grows with each tool result (non-linear latency increase), each orchestrator iteration may dispatch multiple tools in parallel, and the orchestrator is currently capped at 10 total iterations. A 10-tool pipeline may approach or exceed the 5-minute NFR-001 target for large environments (~400+ tables). This risk must be re-evaluated with real multi-tool runs in Phase 2 before committing to the NFR-001 target.
+
+---
+
+## Permission Checker Test Results (Story 2.2)
+
+### Unit Tests (Automated)
+
+**Date:** 2026-04-16  
+**Test count:** 51 new tests added in `SecurityCheckServiceTests.cs`  
+**Result:** PASS — 61/61 tests pass (51 new + 10 pre-existing)
+
+| Test Group | Count | Result |
+|---|---|---|
+| RequiredPrivileges list validation | 14 | PASS |
+| MapPrivilegeName — Read privileges | 13 | PASS |
+| MapPrivilegeName — Non-read privileges | 5 | PASS |
+| MapPrivilegeName — Invalid inputs | 4 | PASS |
+| ComputePrivilegeSets — set logic | 4 | PASS |
+| BuildRecommendation — message construction | 6 | PASS |
+| BuildResponse — status/safeToRun logic | 3 | PASS |
+| Credential failure response shape (AC-5) | 1 | PASS |
+| Request default TargetMode | 1 | PASS |
+
+### Integration Tests (Require Live Dataverse Environment)
+
+Integration tests require a configured Dataverse environment with DataverseDocAgent Reader role.  
+Run manually with `dotnet test --filter "Category=Integration"` when environment is available.
+
+| Test Case | Scenario | Expected | Status |
+|---|---|---|---|
+| TC-1 | Correctly configured DataverseDocAgent Reader role | `status: "ready"`, `missing: []`, `extra: []` | PENDING — requires live env |
+| TC-2 | Role with one privilege removed | `status: "blocked"`, missing[] contains removed privilege | PENDING — requires live env |
+| TC-3 | Invalid client secret | `status: "blocked"`, credential failure message in recommendation | PENDING — requires live env |
+
