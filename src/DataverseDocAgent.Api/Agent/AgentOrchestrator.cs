@@ -16,6 +16,13 @@ public sealed class AgentOrchestrator
 {
     private const int MaxIterations = 10;
 
+    /// <summary>
+    /// Returned when the agent loop exhausts all iterations without reaching end_turn.
+    /// Callers can check for this value to detect an incomplete response.
+    /// </summary>
+    public const string MaxIterationsSentinel =
+        "(Agent loop reached the maximum iteration limit without a final response.)";
+
     private readonly Func<MessageParameters, CancellationToken, Task<MessageResponse>> _sendMessage;
 
     // ── Public constructor (production) ───────────────────────────────────────
@@ -125,7 +132,7 @@ public sealed class AgentOrchestrator
 
         // Max iterations reached — log warning and return sentinel
         Console.Error.WriteLine($"[AgentOrchestrator] Warning: agent loop reached the maximum iteration limit ({MaxIterations}).");
-        return "(Agent loop reached the maximum iteration limit without a final response.)";
+        return MaxIterationsSentinel;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

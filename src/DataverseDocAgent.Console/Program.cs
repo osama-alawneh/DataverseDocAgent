@@ -1,5 +1,7 @@
 // F-001–013 — Phase 1 POC console host
 // Story 1.3: Claude agent tool-use loop — ListCustomTables POC
+// Story 1.4: Timing instrumentation added
+using System.Diagnostics;
 using Anthropic.SDK;
 using DataverseDocAgent.Api.Agent;
 using DataverseDocAgent.Api.Agent.Tools;
@@ -42,18 +44,26 @@ if (string.IsNullOrWhiteSpace(anthropicApiKey))
 // ── Connect to Dataverse ──────────────────────────────────────────────────────
 Console.WriteLine("Connecting to Dataverse...");
 var factory = new DataverseConnectionFactory();
-Microsoft.PowerPlatform.Dataverse.Client.ServiceClient serviceClient;
+Microsoft.PowerPlatform.Dataverse.Client.ServiceClient serviceClient = null!;
+var connectSw = Stopwatch.StartNew();
 try
 {
     serviceClient = await factory.ConnectAsync(credentials);
-    Console.WriteLine("Connected.");
+    connectSw.Stop();
+    Console.WriteLine($"Connected. [connection time: {connectSw.ElapsedMilliseconds} ms]");
 }
 catch (DataverseConnectionException ex)
 {
+    connectSw.Stop();
     Console.WriteLine($"Connection failed: {ex.Message}");
-    return;
+    Environment.Exit(1);
+}
+finally
+{
+    connectSw.Stop(); // no-op if already stopped; guards non-DataverseConnectionException escapes
 }
 
+bool agentFailed = false;
 using (serviceClient)
 {
     // ── Set up tools and orchestrator ─────────────────────────────────────────
@@ -69,15 +79,26 @@ using (serviceClient)
 
     // ── Run agent loop and print result ───────────────────────────────────────
     Console.WriteLine("\nRunning Claude agent loop...\n");
+    var agentSw = Stopwatch.StartNew();
     try
     {
         var result = await orchestrator.RunAsync(Prompt, tools);
+        agentSw.Stop();
+        Console.WriteLine($"[agent loop time: {agentSw.ElapsedMilliseconds} ms]");
         Console.WriteLine("── Claude's response ──────────────────────────────────────");
+        if (string.Equals(result, AgentOrchestrator.MaxIterationsSentinel, StringComparison.Ordinal))
+            Console.WriteLine("[WARNING: agent loop hit iteration limit — response may be incomplete]");
         Console.WriteLine(result);
         Console.WriteLine("───────────────────────────────────────────────────────────");
     }
     catch (Exception ex)
     {
+        agentSw.Stop();
+        Console.WriteLine($"[agent loop time: {agentSw.ElapsedMilliseconds} ms] (failed)");
         Console.WriteLine($"Agent loop failed: {ex.Message}");
+        agentFailed = true;
     }
 }
+
+if (agentFailed)
+    Environment.Exit(1);
