@@ -514,4 +514,4 @@ $RECYCLE.BIN/
 # DataverseDocAgent — sensitive/generated files (AC: 5)
 appsettings.Development.json
 secrets.json
-artefacts/
+# artefacts/ — tracked: contains importable Dataverse solution (Story 2.3)
