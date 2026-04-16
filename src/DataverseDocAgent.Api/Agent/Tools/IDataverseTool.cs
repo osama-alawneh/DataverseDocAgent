@@ -1,13 +1,12 @@
 // F-001 — Custom tool contract for the Claude agent loop
 using System.Text.Json;
-using DataverseDocAgent.Api.Common;
 
 namespace DataverseDocAgent.Api.Agent.Tools;
 
 /// <summary>
 /// Contract for a Dataverse-backed tool that the Claude agent loop can invoke.
-/// SECURITY CONTRACT: Implementors must never serialize, log, or emit the
-/// <see cref="EnvironmentCredentials"/> values passed to <see cref="ExecuteAsync"/>.
+/// Tools are pre-authenticated via constructor injection — credentials are not
+/// passed per-call.
 /// </summary>
 public interface IDataverseTool
 {
@@ -24,9 +23,5 @@ public interface IDataverseTool
     /// Executes the tool and returns a JSON string result.
     /// </summary>
     /// <param name="input">Parsed JSON input matching <see cref="InputSchema"/>.</param>
-    /// <param name="credentials">
-    ///   Live Dataverse credentials — passed by reference only.
-    ///   Must NOT be serialized, logged, or embedded in any returned string.
-    /// </param>
-    Task<string> ExecuteAsync(JsonElement input, EnvironmentCredentials credentials);
+    Task<string> ExecuteAsync(JsonElement input);
 }

@@ -5,7 +5,6 @@ using Anthropic.SDK;
 using Anthropic.SDK.Constants;
 using Anthropic.SDK.Messaging;
 using DataverseDocAgent.Api.Agent.Tools;
-using DataverseDocAgent.Api.Common;
 
 namespace DataverseDocAgent.Api.Agent;
 
@@ -40,21 +39,17 @@ public sealed class AgentOrchestrator
     /// </summary>
     /// <param name="prompt">User prompt sent in the first message.</param>
     /// <param name="tools">Available tools Claude may call.</param>
-    /// <param name="credentials">
-    ///   Live credentials passed to tools — never serialized or logged (AC-6).
-    /// </param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<string> RunAsync(
         string                      prompt,
         IEnumerable<IDataverseTool> tools,
-        EnvironmentCredentials      credentials,
         CancellationToken           ct = default)
     {
-        var toolList   = tools.ToList();
-        var sdkTools   = BuildSdkTools(toolList);
-        var messages   = new List<Message>
+        var toolList = tools.ToList();
+        var sdkTools = BuildSdkTools(toolList);
+        var messages = new List<Message>
         {
-            new(RoleType.User, prompt, null!),
+            new() { Role = RoleType.User, Content = [new TextContent { Text = prompt }] },
         };
 
         for (int iteration = 0; iteration < MaxIterations; iteration++)
@@ -69,8 +64,16 @@ public sealed class AgentOrchestrator
 
             var response = await _sendMessage(parameters, ct).ConfigureAwait(false);
 
-            if (response.StopReason == "tool_use")
+            if (string.Equals(response.StopReason, "tool_use", StringComparison.Ordinal))
             {
+                var toolUseBlocks = response.Content?.OfType<ToolUseContent>().ToList();
+                if (toolUseBlocks is null || toolUseBlocks.Count == 0)
+                {
+                    // Malformed: stop_reason is tool_use but no tool blocks present — treat as end_turn
+                    Console.Error.WriteLine("[AgentOrchestrator] Warning: StopReason is 'tool_use' but Content contains no ToolUseContent blocks. Treating as end_turn.");
+                    return ExtractText(response);
+                }
+
                 // Append assistant message (built from response content)
                 messages.Add(new Message
                 {
@@ -80,14 +83,26 @@ public sealed class AgentOrchestrator
 
                 // Execute every tool_use block and collect results
                 var toolResults = new List<ContentBase>();
-                foreach (var block in response.Content.OfType<ToolUseContent>())
+                foreach (var block in toolUseBlocks)
                 {
                     var tool         = FindTool(toolList, block.Name);
                     var inputElement = ToJsonElement(block.Input);
-                    // credentials passed through — never serialized (AC-6)
-                    var resultJson   = tool is not null
-                        ? await tool.ExecuteAsync(inputElement, credentials).ConfigureAwait(false)
-                        : $"{{\"error\":\"Unknown tool: {block.Name}\"}}";
+                    string resultJson;
+                    if (tool is null)
+                    {
+                        resultJson = JsonSerializer.Serialize(new { error = $"Unknown tool: {block.Name}" });
+                    }
+                    else
+                    {
+                        try
+                        {
+                            resultJson = await tool.ExecuteAsync(inputElement).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            resultJson = JsonSerializer.Serialize(new { error = $"Tool '{block.Name}' failed: {ex.GetType().Name}" });
+                        }
+                    }
 
                     toolResults.Add(new ToolResultContent
                     {
@@ -108,7 +123,8 @@ public sealed class AgentOrchestrator
             return ExtractText(response);
         }
 
-        // Max iterations reached — return whatever text we have
+        // Max iterations reached — log warning and return sentinel
+        Console.Error.WriteLine($"[AgentOrchestrator] Warning: agent loop reached the maximum iteration limit ({MaxIterations}).");
         return "(Agent loop reached the maximum iteration limit without a final response.)";
     }
 
@@ -119,8 +135,17 @@ public sealed class AgentOrchestrator
     {
         return tools.Select(t =>
         {
-            var schemaNode = JsonNode.Parse(t.InputSchema.GetRawText());
-            var function   = new Anthropic.SDK.Common.Function(t.Name, t.Description, schemaNode);
+            JsonNode? schemaNode;
+            try
+            {
+                schemaNode = JsonNode.Parse(t.InputSchema.GetRawText());
+            }
+            catch (JsonException ex)
+            {
+                Console.Error.WriteLine($"[AgentOrchestrator] Warning: failed to parse InputSchema for tool '{t.Name}': {ex.Message}. Falling back to empty schema.");
+                schemaNode = JsonNode.Parse("{}");
+            }
+            var function = new Anthropic.SDK.Common.Function(t.Name, t.Description, schemaNode);
             return (Anthropic.SDK.Common.Tool)function;
         }).ToList();
     }
@@ -138,7 +163,8 @@ public sealed class AgentOrchestrator
     private static string ExtractText(MessageResponse response)
     {
         var text = response.Content
-            .OfType<TextContent>()
+            ?.OfType<TextContent>()
+            .Where(b => b.Text != null)
             .Select(b => b.Text)
             .FirstOrDefault();
 

@@ -1,7 +1,6 @@
 // F-001 — Custom table discovery tool
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using DataverseDocAgent.Api.Common;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
@@ -41,12 +40,9 @@ public sealed class ListCustomTablesTool : IDataverseTool
 
     /// <summary>
     /// Queries Dataverse for all custom entities and returns the result as JSON.
-    /// <paramref name="credentials"/> is accepted for interface compliance (AC-1) but
-    /// is not used — the pre-authenticated <see cref="IOrganizationService"/> is used instead (AC-6).
     /// </summary>
-    public Task<string> ExecuteAsync(JsonElement input, EnvironmentCredentials credentials)
+    public Task<string> ExecuteAsync(JsonElement input)
     {
-        // credentials intentionally unused — ServiceClient is pre-authenticated via constructor
         var entities = FetchCustomEntities();
         var json     = BuildResultJson(entities);
         return Task.FromResult(json);
@@ -77,7 +73,9 @@ public sealed class ListCustomTablesTool : IDataverseTool
 
         var request  = new RetrieveMetadataChangesRequest { Query = query };
         var response = (RetrieveMetadataChangesResponse)_service.Execute(request);
-        return response.EntityMetadata;
+        if (response.EntityMetadata is null)
+            Console.Error.WriteLine("[ListCustomTablesTool] Warning: EntityMetadata was null in RetrieveMetadataChangesResponse.");
+        return response.EntityMetadata ?? [];
     }
 
     internal static string BuildResultJson(IReadOnlyList<EntityMetadata> entities)
@@ -97,7 +95,6 @@ public sealed class ListCustomTablesTool : IDataverseTool
             LogicalName = e.LogicalName,
             SchemaName  = e.SchemaName,
             Description = e.Description?.UserLocalizedLabel?.Label,
-            SolutionName = null, // optional in POC — requires additional query
         }).ToArray();
 
         return JsonSerializer.Serialize(new { tables }, s_jsonOptions);
@@ -110,7 +107,6 @@ public sealed class ListCustomTablesTool : IDataverseTool
         public string? DisplayName  { get; set; }
         public string? LogicalName  { get; set; }
         public string? SchemaName   { get; set; }
-        public string? SolutionName { get; set; }
         public string? Description  { get; set; }
     }
 }

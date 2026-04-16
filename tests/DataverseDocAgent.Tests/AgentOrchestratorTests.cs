@@ -3,7 +3,6 @@ using System.Text.Json.Nodes;
 using Anthropic.SDK.Messaging;
 using DataverseDocAgent.Api.Agent;
 using DataverseDocAgent.Api.Agent.Tools;
-using DataverseDocAgent.Api.Common;
 using Moq;
 
 namespace DataverseDocAgent.Tests;
@@ -20,10 +19,7 @@ public class AgentOrchestratorTests
         var sender = BuildSender(endTurnResponse);
         var orchestrator = new AgentOrchestrator(sender);
 
-        var result = await orchestrator.RunAsync(
-            "list custom tables",
-            [],
-            MakeCredentials());
+        var result = await orchestrator.RunAsync("list custom tables", []);
 
         Assert.False(string.IsNullOrWhiteSpace(result));
         Assert.Contains("answer", result);
@@ -54,22 +50,21 @@ public class AgentOrchestratorTests
         toolMock.Setup(t => t.InputSchema)
                 .Returns(JsonSerializer.Deserialize<JsonElement>("""{"type":"object","properties":{}}"""));
         toolMock
-            .Setup(t => t.ExecuteAsync(It.IsAny<JsonElement>(), It.IsAny<EnvironmentCredentials>()))
+            .Setup(t => t.ExecuteAsync(It.IsAny<JsonElement>()))
             .ReturnsAsync(toolResult);
 
         var orchestrator = new AgentOrchestrator(Sender);
         var result = await orchestrator.RunAsync(
             "do something with my_tool",
-            [toolMock.Object],
-            MakeCredentials());
+            [toolMock.Object]);
 
         // Tool must have been called exactly once
-        toolMock.Verify(t => t.ExecuteAsync(It.IsAny<JsonElement>(), It.IsAny<EnvironmentCredentials>()), Times.Once);
+        toolMock.Verify(t => t.ExecuteAsync(It.IsAny<JsonElement>()), Times.Once);
         Assert.Contains("Final answer", result);
         Assert.Equal(2, callCount);
     }
 
-    // ── AC-4: infinite-loop guard — max 10 iterations ─────────────────────────
+    // ── AC-4: infinite-loop guard — exactly 10 iterations ────────────────────
 
     [Fact]
     public async Task RunAsync_MaxIterationsGuard_StopsAt10()
@@ -84,7 +79,7 @@ public class AgentOrchestratorTests
         toolMock.Setup(t => t.InputSchema)
                 .Returns(JsonSerializer.Deserialize<JsonElement>("""{"type":"object","properties":{}}"""));
         toolMock
-            .Setup(t => t.ExecuteAsync(It.IsAny<JsonElement>(), It.IsAny<EnvironmentCredentials>()))
+            .Setup(t => t.ExecuteAsync(It.IsAny<JsonElement>()))
             .ReturnsAsync("{}");
 
         int callCount = 0;
@@ -95,46 +90,48 @@ public class AgentOrchestratorTests
         }
 
         var orchestrator = new AgentOrchestrator(Sender);
-        // Should not throw — must return after hitting the guard
-        var result = await orchestrator.RunAsync("loop forever", [toolMock.Object], MakeCredentials());
+        // Should not throw — must return sentinel after exactly MaxIterations calls
+        var result = await orchestrator.RunAsync("loop forever", [toolMock.Object]);
 
-        Assert.True(callCount <= 10, $"Expected ≤10 Claude calls, got {callCount}");
+        Assert.Equal(10, callCount);
+        Assert.Contains("maximum iteration limit", result, StringComparison.OrdinalIgnoreCase);
     }
 
-    // ── AC-6: credentials never forwarded in return value ────────────────────
+    // ── P1: tool exception is caught and returned as error JSON, loop does not crash ──
 
     [Fact]
-    public async Task RunAsync_DoesNotIncludeCredentialsInResult()
+    public async Task RunAsync_ToolThrows_ReturnsErrorJsonAndContinues()
     {
-        var response = BuildTextResponse("Clean result returned by Claude.", "end_turn");
-        var orchestrator = new AgentOrchestrator(BuildSender(response));
+        const string toolId   = "call-throw";
+        const string toolName = "throwing_tool";
 
-        var creds = new EnvironmentCredentials
+        var callCount = 0;
+        Task<MessageResponse> Sender(MessageParameters _p, CancellationToken _ct)
         {
-            EnvironmentUrl = "https://xn--leak-test.crm.dynamics.com",
-            TenantId       = "tid-abc123xyz",
-            ClientId       = "cid-abc123xyz",
-            ClientSecret   = "pw-abc123xyz",
-        };
+            callCount++;
+            return Task.FromResult(callCount == 1
+                ? BuildToolUseResponse(toolId, toolName, "{}")
+                : BuildTextResponse("Recovered after tool error.", "end_turn"));
+        }
 
-        var result = await orchestrator.RunAsync("test", [], creds);
+        var toolMock = new Mock<IDataverseTool>();
+        toolMock.Setup(t => t.Name).Returns(toolName);
+        toolMock.Setup(t => t.Description).Returns("throws");
+        toolMock.Setup(t => t.InputSchema)
+                .Returns(JsonSerializer.Deserialize<JsonElement>("""{"type":"object","properties":{}}"""));
+        toolMock
+            .Setup(t => t.ExecuteAsync(It.IsAny<JsonElement>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
 
-        // Verify no credential VALUES appear in the result
-        Assert.DoesNotContain(creds.EnvironmentUrl, result, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(creds.TenantId,       result, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(creds.ClientId,        result, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("pw-abc123xyz",        result, StringComparison.OrdinalIgnoreCase);
+        var orchestrator = new AgentOrchestrator(Sender);
+        // Must not throw — exception is caught and surfaced as tool result error JSON
+        var result = await orchestrator.RunAsync("call throwing tool", [toolMock.Object]);
+
+        Assert.Contains("Recovered", result);
+        Assert.Equal(2, callCount);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private static EnvironmentCredentials MakeCredentials() => new()
-    {
-        EnvironmentUrl = "https://test.crm.dynamics.com",
-        TenantId       = "tid",
-        ClientId       = "cid",
-        ClientSecret   = "cs",
-    };
 
     private static Func<MessageParameters, CancellationToken, Task<MessageResponse>> BuildSender(
         MessageResponse response)

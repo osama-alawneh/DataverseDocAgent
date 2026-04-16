@@ -54,27 +54,30 @@ catch (DataverseConnectionException ex)
     return;
 }
 
-// ── Set up tools and orchestrator ─────────────────────────────────────────────
-var listTablesTool = new ListCustomTablesTool(serviceClient);
-IReadOnlyList<IDataverseTool> tools = [listTablesTool];
-
-var anthropicClient = new AnthropicClient(anthropicApiKey);
-var orchestrator    = new AgentOrchestrator(anthropicClient);
-
-const string Prompt =
-    "You are a Dataverse environment analyst. " +
-    "Use the available tools to list all custom tables in the environment and provide a summary.";
-
-// ── Run agent loop and print result ───────────────────────────────────────────
-Console.WriteLine("\nRunning Claude agent loop...\n");
-try
+using (serviceClient)
 {
-    var result = await orchestrator.RunAsync(Prompt, tools, credentials);
-    Console.WriteLine("── Claude's response ──────────────────────────────────────");
-    Console.WriteLine(result);
-    Console.WriteLine("───────────────────────────────────────────────────────────");
-}
-catch (Exception ex)
-{
-    Console.WriteLine($"Agent loop failed: {ex.Message}");
+    // ── Set up tools and orchestrator ─────────────────────────────────────────
+    var listTablesTool = new ListCustomTablesTool(serviceClient);
+    IReadOnlyList<IDataverseTool> tools = [listTablesTool];
+
+    var anthropicClient = new AnthropicClient(anthropicApiKey);
+    var orchestrator    = new AgentOrchestrator(anthropicClient);
+
+    const string Prompt =
+        "You are a Dataverse environment analyst. " +
+        "Use the available tools to list all custom tables in the environment and provide a summary.";
+
+    // ── Run agent loop and print result ───────────────────────────────────────
+    Console.WriteLine("\nRunning Claude agent loop...\n");
+    try
+    {
+        var result = await orchestrator.RunAsync(Prompt, tools);
+        Console.WriteLine("── Claude's response ──────────────────────────────────────");
+        Console.WriteLine(result);
+        Console.WriteLine("───────────────────────────────────────────────────────────");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Agent loop failed: {ex.Message}");
+    }
 }

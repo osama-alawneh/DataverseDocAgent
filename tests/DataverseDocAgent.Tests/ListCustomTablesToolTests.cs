@@ -1,7 +1,5 @@
 using System.Text.Json;
 using DataverseDocAgent.Api.Agent.Tools;
-using DataverseDocAgent.Api.Common;
-using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
@@ -50,11 +48,10 @@ public class ListCustomTablesToolTests
             .Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
             .Returns(BuildMetadataResponse());
 
-        var tool = new ListCustomTablesTool(svcMock.Object);
-        var creds = MakeCredentials();
-        var result = await tool.ExecuteAsync(EmptyInput(), creds);
+        var tool   = new ListCustomTablesTool(svcMock.Object);
+        var result = await tool.ExecuteAsync(EmptyInput());
 
-        var doc = JsonDocument.Parse(result);
+        var doc  = JsonDocument.Parse(result);
         var root = doc.RootElement;
 
         // Must have "tables" array
@@ -86,8 +83,8 @@ public class ListCustomTablesToolTests
             .Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
             .Returns(BuildMetadataResponse(entity));
 
-        var tool = new ListCustomTablesTool(svcMock.Object);
-        var result = await tool.ExecuteAsync(EmptyInput(), MakeCredentials());
+        var tool   = new ListCustomTablesTool(svcMock.Object);
+        var result = await tool.ExecuteAsync(EmptyInput());
 
         var root = JsonDocument.Parse(result).RootElement;
         Assert.True(root.TryGetProperty("tables", out var tables));
@@ -104,39 +101,29 @@ public class ListCustomTablesToolTests
         Assert.Equal("My Table",    row.GetProperty("displayName").GetString());
     }
 
-    // ── AC-6: credentials never appear in output ──────────────────────────────
+    // ── AC-2: solutionName not in output until query is implemented ───────────
 
     [Fact]
-    public async Task ExecuteAsync_DoesNotLeakCredentials()
+    public async Task ExecuteAsync_WithTables_DoesNotIncludeSolutionName()
     {
+        var entity = new EntityMetadata { LogicalName = "new_table", SchemaName = "new_Table" };
+
         var svcMock = new Mock<IOrganizationService>();
         svcMock
             .Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
-            .Returns(BuildMetadataResponse());
+            .Returns(BuildMetadataResponse(entity));
 
-        var tool = new ListCustomTablesTool(svcMock.Object);
-        var creds = new EnvironmentCredentials
-        {
-            EnvironmentUrl = "https://secret-env.crm.dynamics.com",
-            TenantId       = "secret-tenant-id",
-            ClientId       = "secret-client-id",
-            ClientSecret   = "super-secret-password",
-        };
+        var tool   = new ListCustomTablesTool(svcMock.Object);
+        var result = await tool.ExecuteAsync(EmptyInput());
 
-        var result = await tool.ExecuteAsync(EmptyInput(), creds);
+        var root = JsonDocument.Parse(result).RootElement;
+        var row  = root.GetProperty("tables")[0];
 
-        Assert.DoesNotContain("secret", result, StringComparison.OrdinalIgnoreCase);
+        Assert.False(row.TryGetProperty("solutionName", out _),
+            "solutionName must not appear in output until the solution query is implemented");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private static EnvironmentCredentials MakeCredentials() => new()
-    {
-        EnvironmentUrl = "https://test.crm.dynamics.com",
-        TenantId       = "tid",
-        ClientId       = "cid",
-        ClientSecret   = "cs",
-    };
 
     private static JsonElement EmptyInput()
         => JsonSerializer.Deserialize<JsonElement>("{}");
@@ -144,8 +131,7 @@ public class ListCustomTablesToolTests
     private static RetrieveMetadataChangesResponse BuildMetadataResponse(
         params EntityMetadata[] entities)
     {
-        var response = new RetrieveMetadataChangesResponse();
-        // EntityMetadata collection is internal — set via reflection
+        var response   = new RetrieveMetadataChangesResponse();
         var collection = new EntityMetadataCollection();
         foreach (var e in entities)
             collection.Add(e);
@@ -156,9 +142,11 @@ public class ListCustomTablesToolTests
     private static void SetLabel(EntityMetadata entity, string propertyName, string text)
     {
         var prop = typeof(EntityMetadata).GetProperty(propertyName);
-        if (prop == null) return;
+        Assert.NotNull(prop); // property must exist on EntityMetadata SDK type
 
         var labelObj = Activator.CreateInstance(prop.PropertyType);
+        Assert.IsType<Label>(labelObj); // must be a Label — fails fast if SDK changes internal structure
+
         if (labelObj is Label label)
         {
             label.UserLocalizedLabel = new LocalizedLabel(text, 1033);
