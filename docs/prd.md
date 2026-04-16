@@ -1,10 +1,11 @@
 # DataverseDocAgent — Product Requirements Document
 
-**Version:** 3.0 — BMAD Compliant  
+**Version:** 4.0 — Senior Consultant Requirements Merge  
 **BMAD Status:** VALIDATED — 6/6 core sections present  
-**Previous Versions:** v1 (Engineering Spec) | v2 (Security + Feature Registry) | v3 (Full BMAD Merge)  
+**Previous Versions:** v1 (Engineering Spec) | v2 (Security + Feature Registry) | v3 (Full BMAD Merge) | v4 (Environment Intelligence + Output Quality)  
 **Owner:** Osama — Founder & Lead Developer  
 **Last Updated:** April 2026  
+**v4 Changes:** Added FR-041–054 (14 new FRs). Rewrote FR-012 (tiered recommendation format). Enhanced FR-001, FR-003, FR-004/005, FR-013. Added NFR-016/017. Restructured Mode 1 output to two-layer (Executive + Technical Reference). Added Mermaid diagram, blast radius classification, confidence layer, execution identity, publisher prefix intelligence, table signal scoring.  
 
 ---
 
@@ -20,7 +21,17 @@
 4. [Feature Registry](#4-feature-registry)
 5. [Security Architecture](#5-security-architecture)
 6. [Functional Requirements](#6-functional-requirements)
+   - 6.1 Core Documentation (Mode 1)
+   - 6.2 Field Impact Analyser (Mode 2)
+   - 6.3 Health Audit (Mode 3)
+   - 6.4 Security & Trust
+   - 6.5 API Layer
+   - 6.6 Environment Intelligence (Mode 1)
+   - 6.7 Health Audit Additions (Mode 3)
 7. [Non-Functional Requirements](#7-non-functional-requirements)
+   - 7.1–7.6 Performance, Availability, Security, Scalability, Compliance, Reliability
+   - 7.7 Output Quality
+   - 7.8 Maintainability
 8. [Technical Architecture](#8-technical-architecture)
 9. [Build Roadmap](#9-build-roadmap)
 10. [Business Model](#10-business-model)
@@ -63,7 +74,14 @@ DataverseDocAgent is the first tool to combine deep, multi-layer environment rea
 - Service account authentication via Microsoft Entra App Registration (client credentials / daemon flow)
 - Read-only access to: custom tables, custom fields, relationships, plugin assemblies (decompiled), JavaScript web resources, Power Automate flow definitions (solution-aware), classic workflow XAML, security roles and privileges, system forms, saved queries, organisation metadata
 - API-only delivery: ASP.NET Core Web API accessed via HTTP client (Postman, custom integration)
-- Word (.docx) output for Mode 1; structured JSON responses for Modes 2 and 3
+- Word (.docx) output for Mode 1 in a two-layer structure (Executive Layer + Technical Reference Layer); structured JSON responses for Modes 2 and 3
+- Mermaid entity-relationship diagram embedded in Mode 1 Executive Layer; full Mermaid source in Technical Reference Layer
+- Publisher prefix intelligence — identifies client vs Microsoft vs ISV components
+- Table signal scoring — record recency, relationship isolation, logic coverage, form presence per table
+- Plugin blast radius classification — synchronous/asynchronous, pre/post-operation, filter condition, error handling, deterministic risk tier
+- Execution identity documentation — per plugin, workflow, and flow
+- Confidence layer — `[VERIFIED]` / `[INFERRED]` / `[ESTIMATED]` tags on all AI-generated findings
+- Application user inventory — integration signal detection (Phase A)
 - Pre-built importable Dataverse security role solution (`DataverseDocAgent_SecurityRole.zip`)
 - Permission pre-flight checker (`POST /api/security/check`) as a mandatory gate before any mode runs
 - Azure App Service hosting (Free Tier for MVP; Basic Tier upon first paying customer)
@@ -158,10 +176,15 @@ These are hard product boundaries that will not change regardless of version or 
 | 2 | Waits (target: under 5 minutes for typical environments; under 10 minutes for large) | Agent reads: tables, fields, relationships, plugins (decompiled), Power Automate flows, classic workflows, JavaScript web resources, security roles |
 | 3 | Receives JSON response containing a secure download URL and token | Token is valid for 24 hours |
 | 4 | Calls `GET /api/download/{token}` | Receives the `.docx` file |
-| 5 | Opens document and reviews the 9-section report | Complete technical documentation ready for client sharing or internal project planning |
-| 6 | Reviews the Recommendations section | Identifies immediate risks, performance concerns, and deprecated API usage as talking points for the client |
+| 5 | Opens document — reads Executive Layer first | Environment narrative paragraph identifies business process in plain English. Publisher prefix summary (`doc_`, `vel_`, etc.) tells them immediately which tables are client-built vs Microsoft. Top 5 Risks tells them what to address before touching anything. |
+| 6 | Reviews Mermaid relationship diagram | Custom data model visible at a glance — identifies core tables, relationship types, and cascade-delete risks without reading the full document |
+| 7 | Reviews table signal assessments | Four-signal summary per table (record count + recency, island status, logic coverage, form presence) shows which tables are load-bearing, active, or abandoned |
+| 8 | Reviews plugin blast radius classifications | Each plugin shows sync/async, pre/post-operation, filter status, error handling, execution identity, and risk tier — consultant knows the dangerous code on day one |
+| 9 | Checks app user inventory | Application users listed as integration signals — consultant knows which external systems are writing to the environment |
+| 10 | Reviews Technical Reference Layer as needed | Developers use field catalogues, full plugin analysis, execution identity records, and flow/workflow docs as working reference |
+| 11 | Notes confidence tags on findings | `[VERIFIED]` findings handed to client directly. `[INFERRED]` and `[ESTIMATED]` findings reviewed before sharing. |
 
-**Success:** `.docx` received within the time target. The manual 2–3 day documentation task is replaced in a single API call.  
+**Success:** `.docx` received within the time target. Executive Layer readable in under 10 minutes. Publisher prefix, table signals, blast radius classification, and app user inventory answer the first-hour orientation questions. Technical Reference used as working reference by developers. Manual 2–3 day documentation task replaced in a single API call.  
 **Failure — generation timeout:** Request times out or returns a partial result. Consultant receives a structured error response. Credentials are not retained; no partial output is stored.  
 **Failure — credential rejection:** Dataverse rejects the credentials during connection test. API returns a 401-equivalent with a clear message before any AI tokens are consumed.
 
@@ -279,6 +302,25 @@ Every feature planned for DataverseDocAgent is tracked below. This is the single
 | F-038 | POST /api/health/audit | API | P5 | Planned | High |
 | F-039 | POST /api/security/check | API | P2 | In Design | Critical |
 | F-040 | GET /api/download/{token} | API | P2 | Planned | Critical |
+
+### Environment Intelligence
+
+| ID | Feature | Mode | Phase | Status | Priority |
+|----|---------|------|-------|--------|----------|
+| F-046 | Opening environment narrative — business process inference | Mode 1 | P3 | Planned | High |
+| F-047 | Publisher prefix intelligence | Mode 1 | P2 | Planned | High |
+| F-048 | Table signal scoring — 4-signal assessment (recency, relationships, logic, form) | Mode 1 | P3 | Planned | High |
+| F-049 | Plugin blast radius classification (sync/async, pre/post, filter, error handling, risk tier) | Mode 1 | P3 | Planned | Critical |
+| F-050 | Confidence layer — [VERIFIED]/[INFERRED]/[ESTIMATED] taxonomy on all findings | Mode 1+3 | P3 | Planned | Critical |
+| F-051 | Two-layer output structure (Executive Layer + Technical Reference Layer) | Mode 1 | P3 | Planned | High |
+| F-052 | Top 5 Risks section in Mode 1 Executive Layer | Mode 1 | P3 | Planned | High |
+| F-053 | Execution identity documentation per plugin/flow/workflow | Mode 1 | P3 | Planned | High |
+| F-054 | Mermaid relationship diagram (custom data model) | Mode 1 | P3 | Planned | High |
+| F-055 | Integration signals — application user inventory | Mode 1 | P2 | Planned | Medium |
+| F-056 | Integration signals — table ownership by app users | Mode 3 | P5 | Planned | Medium |
+| F-057 | Abandoned plugin detection | Mode 3 | P5 | Planned | High |
+| F-058 | Zero-record table detection | Mode 3 | P5 | Planned | Medium |
+| F-059 | Unmanaged solution detection | Mode 3 | P5 | Planned | High |
 
 ### Future / Web UI (Out of Scope v1 — Tracked for Reference)
 
@@ -456,11 +498,18 @@ Each FR is derived from the Feature Registry (Section 4) and elevated to a measu
 **FR-001 — Custom Table Discovery**  
 `F-001 | Phase P2 | Priority: Critical`
 
-The system SHALL discover and document all custom tables in the connected Dataverse environment.
+The system SHALL discover and document all custom tables in the connected Dataverse environment, including activity signals that indicate whether each table is live, abandoned, or integration-managed.
 
 *Acceptance Criteria:*
 - All tables where `IsCustomEntity = true` are included in the output
-- Each table entry includes: display name, logical name, solution membership, AI-inferred business purpose, and key field summary
+- Each table entry includes: display name, logical name, publisher prefix, solution membership, AI-inferred business purpose, and key field summary
+- **Publisher prefix** is surfaced per table (e.g., `doc_`, `vel_`, `msdyn_`) to immediately distinguish client-built from ISV from Microsoft tables
+- **Record count and recency**: total record count plus the date of the most recently created or modified record. A table with 5,000 records last modified in 2019 is treated differently from one modified yesterday
+- **Four-signal table assessment** for every table:
+  1. Record count + recency (live / inactive / empty)
+  2. Relationship count — tables with no inbound and no outbound relationships flagged as "island" tables
+  3. Plugin and flow coverage count — tables with 3+ logic components flagged as "load-bearing"
+  4. Form presence — tables with no `SystemForm` flagged as "background data store or abandoned"
 - System tables are excluded unless they carry solution-owned customisations
 - If zero custom tables exist, the document section states this explicitly rather than being omitted
 
@@ -482,38 +531,52 @@ The system SHALL document all custom fields for every discovered custom table.
 **FR-003 — Relationship Mapping**  
 `F-003 | Phase P2 | Priority: Critical`
 
-The system SHALL map and document all custom relationships between tables.
+The system SHALL map and document all custom relationships between tables, with cascade behaviour detail sufficient to power the Mermaid diagram (FR-049).
 
 *Acceptance Criteria:*
 - All relationships where `IsCustomRelationship = true` are included (both 1:N and N:N)
 - Each entry includes: relationship type, both participating tables, schema name, cascade behaviour (delete, assign, share, unshare), and AI-inferred business meaning
+- **Cascade-on-delete behaviour** is explicitly documented per relationship (Cascade / Remove Link / Restrict / No Action) — this is the critical signal for "if I delete a parent record, what else gets deleted"
 - Self-referential relationships are supported and labelled as such
+- Relationship data is structured to feed the Mermaid diagram generator (FR-049) — each relationship produces one diagram edge with type, schema name, and delete cascade label
 
 ---
 
 **FR-004 — Plugin DLL Retrieval and Decompilation**  
 `F-004 | Phase P3 | Priority: Critical`
 
-The system SHALL retrieve compiled plugin assemblies from Dataverse and decompile them to readable C# source.
+The system SHALL retrieve compiled plugin assemblies from Dataverse and decompile them to readable C# source, capturing all registration metadata required for blast radius classification (FR-044).
 
 *Acceptance Criteria:*
 - All `PluginAssembly` records registered in the environment are retrieved
-- DLLs are decompiled in-process using dnlib without writing to disk at any stage
+- For each assembly, all associated `SdkMessageProcessingStep` records are retrieved to capture: message name, entity name, execution mode (synchronous/asynchronous), pipeline stage (pre-operation/post-operation), attribute filter (specific field list or empty = unfiltered), rank/order
+- DLLs are decompiled in-memory without writing to disk at any stage
 - Decompilation produces syntactically valid C# that is passed directly to the AI analysis step
-- If a DLL cannot be decompiled (e.g., obfuscated or corrupted), the plugin entry is included in the output with an explicit flag: "Decompilation failed — manual review required"
+- If a DLL cannot be decompiled (e.g., obfuscated or corrupted), the plugin entry is included in the output with an explicit flag: "Decompilation failed — manual review required" — this flag is never omitted silently
+- `PluginAssembly.ModifiedOn` date is retrieved to support abandoned plugin detection (FR-052)
 
 ---
 
-**FR-005 — Plain-English Plugin Logic Explanation**  
+**FR-005 — Plain-English Plugin Logic Explanation and Blast Radius Classification**  
 `F-005 | Phase P3 | Priority: Critical`
 
-The system SHALL generate a plain-English explanation of each plugin's logic via AI analysis of the decompiled source.
+The system SHALL generate a plain-English explanation of each plugin's logic and a blast radius classification derived from its registration metadata.
 
 *Acceptance Criteria:*
-- Each plugin explanation includes: what the plugin does in plain English, which fields it reads, which fields it writes, which event and stage it fires on, and any risk flags identified
+- Each plugin entry includes all of the following fields:
+  - **Plain-English description** of what the plugin does
+  - **Execution mode:** Synchronous or Asynchronous
+  - **Pipeline stage:** Pre-operation or Post-operation
+  - **Registered event and entity:** e.g., "Update on `vel_equipment`"
+  - **Attribute filter:** List of specific fields that trigger it, or "Unfiltered — fires on every field change"
+  - **Error handling:** try/catch block present or absent
+  - **Execution identity:** Calling User / System / Impersonated user (name if available) — see FR-048
+  - **Fields read** and **fields written** (where identifiable from code analysis)
+  - **Blast radius risk tier** (see FR-044): Critical / High / Medium / Low — with one-sentence rationale
 - Explanations are written to be understandable to a non-developer stakeholder
 - Raw decompiled C# source is not reproduced verbatim in the output document
-- If a plugin's logic could not be analysed (decompilation failed per FR-004), the explanation section notes this and does not fabricate content
+- If a plugin's logic could not be analysed (decompilation failed per FR-004), the entry notes this explicitly and does not fabricate content — confidence tag: `[ESTIMATED]` for any inferences made from registration metadata alone
+- Every AI-generated statement carries a confidence tag per FR-045
 
 ---
 
@@ -589,29 +652,54 @@ The system SHALL generate an executive summary as the first section of the Mode 
 
 ---
 
-**FR-012 — AI Recommendations Section**  
-`F-012 | Phase P3 | Priority: High`
+**FR-012 — Recommendation Quality Standard**  
+`F-012 | Phase P3 | Priority: Critical`
 
-The system SHALL generate a recommendations section containing AI-identified risks, bad practices, and improvement suggestions specific to the environment.
+The system SHALL generate all recommendations using a tiered format determined by finding severity. Every recommendation references the specific named entity it applies to — no generic advice.
+
+**Severity Tier Formats:**
+
+*Critical / High findings — 5-part format:*
+- **What:** [Specific named entity and the identified issue]
+- **Why this is a problem:** [Plain-English explanation of the risk]
+- **What will happen if not fixed:** [Specific consequence if left unresolved]
+- **How to fix:** [Exact recommended action]
+- **Estimated effort:** [e.g., "Estimated effort: 2–4 hours for a developer familiar with this environment"]
+
+*Medium / Warning findings — 3-part format:*
+- **What:** [Specific named entity and the identified issue]
+- **Why it matters:** [Plain-English explanation]
+- **Recommended action:** [Specific action to take]
+
+*Low / Advisory findings — 1-part format:*
+- Single sentence naming the entity and the recommended action.
 
 *Acceptance Criteria:*
-- Every recommendation references the specific plugin, field, flow, or role it applies to — no generic advice
-- Recommendations are categorised (Performance, Security, Code Quality, Maintenance, Deprecated APIs)
-- At minimum one recommendation is generated if any plugin, flow, or JavaScript file is present in the environment
+- Every recommendation references a specific named entity (plugin name, table name, field logical name, flow name, role name) — never a generic category
+- Recommendations are categorised: Performance, Security, Code Quality, Maintenance, Deprecated APIs, Data Hygiene, ALM
+- Critical and High findings use the 5-part format; deviation is a quality failure
+- Medium findings use the 3-part format
+- Low/Advisory findings use the single-sentence format
+- At minimum one recommendation generated if any plugin, flow, or JavaScript file is present
+- Every recommendation carries a confidence tag: `[VERIFIED]`, `[INFERRED]`, or `[ESTIMATED]` (see FR-045)
+- This format standard applies to all recommendations in Mode 1 (Recommendations section, Top 5 Risks) and Mode 3 (Health Audit report card)
 
 ---
 
-**FR-013 — Word Document Generation**  
-`F-013 | Phase P2 | Priority: Critical`
+**FR-013 — Word Document Generation — Two-Layer Structure**  
+`F-013 | Phase P2/P3 | Priority: Critical`
 
-The system SHALL produce a downloadable Word (.docx) document containing the complete Mode 1 report.
+The system SHALL produce a downloadable Word (.docx) document containing the complete Mode 1 report, structured as two distinct layers to serve both executive and technical audiences (see FR-046).
 
 *Acceptance Criteria:*
 - Output is a valid `.docx` file openable in Microsoft Word 2016 and later
-- Document contains the 9 sections defined in Section 8.1 (Product Modes)
+- Document is structured in two layers with a clear section break and separate table of contents entries:
+  - **Executive Layer** (first): Environment narrative, publisher prefix summary, complexity summary, Mermaid relationship diagram, Top 5 Risks — written for a CTO or senior stakeholder reading in the first 5 minutes
+  - **Technical Reference Layer** (second): Full field catalogue, complete plugin analysis, flow/workflow step-by-step, security role privilege tables — written as reference material for developers
 - Document is returned via a secure time-limited download token (`GET /api/download/{token}`)
 - Download token expires after 24 hours; requests after expiry return a 404-equivalent
 - The document is not stored server-side after the token expires
+- The two-layer structure is in effect from P3 (Mode 1 Full); P2 (Mode 1 MVP) may produce a single-layer document with a placeholder for the executive layer
 
 ---
 
@@ -858,7 +946,8 @@ The product SHALL make the five-step service account setup guide available to cu
 
 *Acceptance Criteria:*
 - Guide covers all steps: Entra App Registration, Application User creation, security role import, role assignment, and permission checker run
-- Guide is published in a form customers can access without contacting support
+- Guide URL is returned in the `recommendation` field of `POST /api/security/check` responses when a setup action is required, and published at a stable public URL referenced in the product documentation
+- A customer who has never used the product can complete setup without contacting support — verified by completing the setup process from the guide alone
 
 ---
 
@@ -870,7 +959,7 @@ The system SHALL handle credentials exclusively in server memory and SHALL NOT w
 *Acceptance Criteria:*
 - No credential values (client ID, client secret, tenant ID) appear in any application log — verified by log review
 - No credential values are written to disk, database, or cache at any stage of the request lifecycle (see Section 5.2 for the credential flow)
-- Credentials are passed as C# object parameters on the call stack and are eligible for garbage collection immediately upon request completion
+- Credentials are not retained in server memory after request completion — they exist only for the duration of the active request and are not reachable after it ends
 - This requirement must pass code review before any paying customer connects a live environment
 
 ---
@@ -950,6 +1039,225 @@ The system SHALL expose a secure document download endpoint that returns the gen
 - Returns HTTP 404 for an expired or invalid token
 - Token lifetime is exactly 24 hours from generation
 - No authentication credential beyond the token itself is required to complete the download
+
+---
+
+### 6.6 Environment Intelligence (Mode 1)
+
+---
+
+**FR-041 — Opening Environment Narrative**  
+`F-046 | Phase P3 | Priority: High`
+
+The system SHALL generate an opening narrative paragraph as the first element of the Mode 1 executive document, inferring the primary business process and identifying the core operational tables by name.
+
+*Acceptance Criteria:*
+- Narrative is a single coherent paragraph (3–5 sentences), not a bullet list
+- Identifies the inferred business process in one sentence: e.g., "This environment appears to support a field service and asset management function"
+- Names the top 3–5 tables by record count and recency with their actual record counts: e.g., "The core operational tables are `vel_equipment` (4,000 records, active), `vel_workorder` (12,500 records, active), and `vel_employeeassignment` (847 records, active)"
+- States where business logic is concentrated: e.g., "Business logic is concentrated in 3 plugins and 2 flows, all operating on `vel_workorder`"
+- If inference confidence is low (e.g., only 2 custom tables, no clear naming pattern), the narrative acknowledges this explicitly: "The environment's purpose could not be inferred with confidence from available signals"
+- Confidence tag: `[INFERRED]` on the business process inference sentence; `[VERIFIED]` on record counts and table names
+
+---
+
+**FR-042 — Publisher Prefix Intelligence**  
+`F-047 | Phase P2 | Priority: High`
+
+The system SHALL identify all solution publisher prefixes present in the environment and surface them in the executive document to orient the consultant immediately.
+
+*Acceptance Criteria:*
+- Lists all unique publisher prefixes found across custom components (e.g., `doc_`, `vel_`, `cr2a3_`)
+- Identifies the primary client customisation prefix (highest volume of custom components)
+- Distinguishes client-built (custom prefix), ISV (known ISV prefix patterns), and Microsoft (e.g., `msdyn_`, `msft_`, `adx_`) components
+- Surfaces this in the executive layer as: "All client customisations use the prefix `vel_`. Microsoft components use `msdyn_`. No third-party ISV components detected."
+- If multiple custom prefixes exist, each is listed with its component count — multiple prefixes indicate multiple development teams or migration history
+
+---
+
+**FR-043 — Table Signal Scoring**  
+`F-048 | Phase P3 | Priority: High`
+
+The system SHALL evaluate each custom table against four signals and produce a per-table signal summary that informs the consultant which tables are load-bearing, active, or abandoned.
+
+*Acceptance Criteria:*
+- **Signal 1 — Record count + recency:** Total records plus date of most recent record. Classification: Active (records within 90 days), Inactive (no records within 1 year), Empty (zero records)
+- **Signal 2 — Relationship isolation:** Tables with zero inbound and zero outbound custom relationships flagged as "island" — either abandoned or integration-managed
+- **Signal 3 — Logic coverage:** Total count of plugins + flows registered on or watching the table. Tables with 3+ logic components flagged as "load-bearing — do not modify without full dependency review"
+- **Signal 4 — Form presence:** Whether the table appears on any `SystemForm`. Tables with no form flagged as "background data store or abandoned mid-build"
+- Signal summary appears alongside each table entry in the Mode 1 document
+- Confidence tags: Signal 1 and 3 are `[VERIFIED]`; Signal 4 is `[VERIFIED]`; Signal 2 is `[VERIFIED]`; AI-inferred classifications (e.g., "abandoned mid-build") are `[INFERRED]`
+
+---
+
+**FR-044 — Plugin Blast Radius Classification**  
+`F-049 | Phase P3 | Priority: Critical`
+
+The system SHALL classify every plugin registration by execution mode, pipeline stage, filter condition, and error handling presence, and derive a deterministic risk tier.
+
+*Acceptance Criteria:*
+- Per plugin registration, the following fields are populated: execution mode (Synchronous / Asynchronous), pipeline stage (Pre-operation / Post-operation), attribute filter (specific fields listed, or "Unfiltered"), error handling (try/catch present / absent)
+- **Risk tier logic (deterministic, not AI-generated):**
+  - `Critical` — Synchronous + Pre-operation + Unfiltered + No error handling
+  - `High` — Synchronous + Pre-operation + any one of: (Unfiltered OR No error handling)
+  - `Medium` — Synchronous + Post-operation, or Asynchronous with risk factors (Unfiltered OR No error handling)
+  - `Low` — Well-configured: filtered, error-handled, or asynchronous with no risk factors
+- Risk tier and one-sentence rationale appear in the plugin entry: e.g., "Critical — synchronous pre-operation plugin on `vel_equipment` Update with no attribute filter and no error handling. If this plugin throws an exception, every equipment record save fails for all users."
+- Risk tier is `[VERIFIED]` (derived from Dataverse metadata); rationale is `[VERIFIED]`
+
+---
+
+**FR-045 — Confidence Layer Taxonomy**  
+`F-050 | Phase P3 | Priority: Critical`
+
+The system SHALL tag every AI-generated finding, explanation, and recommendation with a confidence indicator from the defined three-level taxonomy.
+
+*Acceptance Criteria:*
+- **Taxonomy definitions:**
+  - `[VERIFIED]` — Derived directly from decompiled code analysis or explicit Dataverse metadata (field values, registration records)
+  - `[INFERRED]` — Derived from naming patterns, structural analysis, record volumes, or relationships — reasoned from evidence but not directly stated in source
+  - `[ESTIMATED]` — Based on extrapolation with limited data, or where the source could not be analysed (e.g., decompilation failed)
+- Every AI-generated statement in the Mode 1 and Mode 3 output carries exactly one tag
+- Tags appear inline with the finding, not in a footnote
+- Recommendations carry the tag of their lowest-confidence supporting statement
+- If an entire section could not be analysed (e.g., all plugins failed decompilation), the section header carries `[ESTIMATED]` and the rationale is stated
+
+---
+
+**FR-046 — Two-Layer Output Structure**  
+`F-051 | Phase P3 | Priority: High`
+
+The system SHALL produce a Mode 1 document with a distinct Executive Layer and Technical Reference Layer, structurally separated to serve both executive and developer audiences.
+
+*Acceptance Criteria:*
+- **Executive Layer** contains: environment opening narrative (FR-041), publisher prefix summary (FR-042), complexity rating and headline counts, Mermaid relationship diagram (FR-049), Top 5 Risks (FR-047)
+- **Technical Reference Layer** contains: full field catalogue (FR-002), complete plugin analysis with all blast radius fields (FR-005), flow/workflow step-by-step documentation (FR-007/008), security role privilege tables (FR-010), integration signal summary (FR-050)
+- Both layers are in the same `.docx` file, separated by a page break and clearly labelled
+- Table of contents has separate entries pointing to the Executive Layer and the Technical Reference Layer
+- Executive Layer is designed to be readable in under 10 minutes without reference to the Technical Layer
+- Field-level schema dumps are in the Technical Reference Layer only — never in the Executive Layer
+
+---
+
+**FR-047 — Top 5 Risks in Mode 1 Executive Layer**  
+`F-052 | Phase P3 | Priority: High`
+
+The system SHALL include a "Top Risks" section in the Mode 1 Executive Layer, derived from Mode 1 scan findings, without requiring Mode 3 to be run.
+
+*Acceptance Criteria:*
+- Maximum 5 risk items; ranked by severity (Critical first, then High)
+- Each risk item follows the FR-012 Critical/High 5-part recommendation format
+- Risk items are sourced from: Critical/High blast radius plugins (FR-044), unfiltered plugins on core tables, plugins with no error handling on synchronous pre-operation steps, over-privileged security roles, and any other Critical or High findings from the Mode 1 scan
+- If fewer than 5 risks found, all are listed; if zero, states: "No Critical or High risks identified in this scan"
+- This section does not replace Mode 3 — it surfaces Mode 1-visible risks only
+- Consultant can use this section immediately without running a separate health audit
+
+---
+
+**FR-048 — Execution Identity Documentation**  
+`F-053 | Phase P3 | Priority: High`
+
+The system SHALL document the execution identity context for every plugin, classic workflow, and Power Automate flow, so consultants and auditors know what identity each operation runs under.
+
+*Acceptance Criteria:*
+- **Per plugin registration:** Execution identity surfaced as: "Calling User" (runs as whoever triggered the operation), "System" (runs as SYSTEM — no human identity in audit log), or "Impersonated: [user name]" (runs as a specific named user regardless of who triggered it)
+- **Per classic workflow:** Owner name of the workflow definition record — this is the identity under which the workflow runs
+- **Per Power Automate flow:** Connection owner name. Flag: if the connection owner is a disabled or inactive system user, the flow is flagged as "At risk of silent failure — connection owner [name] is no longer active"
+- Execution identity is a mandatory field on every plugin, workflow, and flow entry — never omitted
+- Entries where execution identity could not be determined are marked `[ESTIMATED]`
+
+---
+
+**FR-049 — Mermaid Relationship Diagram**  
+`F-054 | Phase P3 | Priority: High`
+
+The system SHALL generate a Mermaid entity-relationship diagram of the environment's custom data model, embedded in the Mode 1 Executive Layer.
+
+*Acceptance Criteria:*
+- Diagram includes: all custom tables, plus standard Dataverse/D365 tables that have a direct relationship to at least one custom table
+- Each relationship line shows: relationship type (1:N or N:N), schema name, and cascade-on-delete behaviour label (e.g., "Cascade" or "Restrict")
+- Self-referential relationships are shown with a loop arrow
+- Full Mermaid source code is included as a code block in the Technical Reference Layer for copy/paste into any Mermaid renderer
+- Diagram is generated deterministically from relationship metadata — no AI involved in diagram construction
+- If more than 40 nodes would be included, the diagram is limited to custom tables only (no standard tables) to remain readable, with a note stating this
+
+---
+
+**FR-050 — Integration Signal Detection — App User Inventory**  
+`F-055 | Phase P2 | Priority: Medium`
+
+The system SHALL list all application users registered in the environment as integration identity indicators, visible in the Mode 1 Technical Reference Layer.
+
+*Acceptance Criteria:*
+- Retrieves all `SystemUser` records where `IsLicensed = false` and `ApplicationId` is populated (these are application users, not human users)
+- Per application user: display name, application (client) ID, security roles assigned
+- Surfaced with the label: "Application users are typically used by external integrations. The following application users are registered and may be writing to tables in this environment"
+- Does not require audit log access; based on registered application users only
+- If zero application users found: states this explicitly
+
+---
+
+### 6.7 Health Audit Additions (Mode 3)
+
+---
+
+**FR-051 — Integration Signal Detection — Table Ownership**  
+`F-056 | Phase P5 | Priority: Medium`
+
+The system SHALL identify tables where a significant proportion of records are owned by application users rather than human users, indicating integration-managed data.
+
+*Acceptance Criteria:*
+- Flags tables where >50% of records have an application user as `OwnerId`
+- Per flagged table: table name, percentage of app-user-owned records, application user name(s)
+- Label: "This table appears to be primarily managed by an external integration via [application user name]"
+- Classified as Advisory (🟢) — recommendation follows FR-012 single-sentence format
+
+---
+
+**FR-052 — Abandoned Plugin Detection**  
+`F-057 | Phase P5 | Priority: High`
+
+The system SHALL detect plugin assemblies that show signs of abandonment based on age and registration state.
+
+*Acceptance Criteria:*
+- Flags plugins where `PluginAssembly.ModifiedOn` is more than 3 years prior to scan date
+- Sub-classification: if the assembly has no active `SdkMessageProcessingStep` records → Advisory (🟢); if the assembly has active steps but is 3+ years old → Warning (🟡)
+- Per flagged plugin: assembly name, last modified date, active step count, registered events (if any)
+- Recommendation follows FR-012 format for the applicable severity tier
+- Note: "An old assembly date does not confirm abandonment — confirm with the client whether this plugin is still intentionally active"
+- Confidence tag: `[INFERRED]` — age is verified, abandonment is inferred
+
+---
+
+**FR-053 — Zero-Record Table Detection**  
+`F-058 | Phase P5 | Priority: Medium`
+
+The system SHALL detect custom tables with zero records and classify them by their risk signal.
+
+*Acceptance Criteria:*
+- Returns all custom tables with a record count of zero
+- Per flagged table: table name, publisher prefix, created date, relationship count, form presence
+- Sub-classification: zero records + no relationships + no form → Warning (🟡) "likely abandoned mid-build"; zero records + has relationships or form → Advisory (🟢) "possibly pre-production or integration-managed"
+- Recommendation follows FR-012 format for the applicable severity tier
+- Confidence tag: `[VERIFIED]` for record count; `[INFERRED]` for abandonment classification
+
+---
+
+**FR-054 — Unmanaged Solution Detection**  
+`F-059 | Phase P5 | Priority: High`
+
+The system SHALL detect unmanaged solutions in the environment and produce a full 5-part FR-012 recommendation for each.
+
+*Acceptance Criteria:*
+- Lists all solutions where `IsManaged = false` and the publisher customisation prefix is not a Microsoft-owned prefix
+- Per solution: solution name, publisher, creation date, component count
+- Each flagged solution produces a Critical/High 5-part recommendation (FR-012):
+  - **What:** "[Solution name] — [N] unmanaged components in [environment name] (publisher: [publisher name], created [year])"
+  - **Why this is a problem:** "Unmanaged solution components can be accidentally overwritten by future solution imports. Changes made directly bypass the ALM pipeline — they exist only in this environment and will be lost on restore or redeploy"
+  - **What will happen if not fixed:** "The next managed solution import that touches these components will silently overwrite your customisations. This has caused data loss and broken business processes in production environments"
+  - **How to fix:** "Export the unmanaged components as a managed solution. Import that managed solution back into production. Delete the unmanaged layers. Test in sandbox first. Estimated effort: 2–4 hours for a developer familiar with this environment"
+  - **Confidence:** `[VERIFIED]`
+- Classified as Warning (🟡) if solution has <10 components; High (🔴) if ≥10 components
 
 ---
 
@@ -1129,7 +1437,42 @@ All API endpoints SHALL return structured JSON error responses for all failure c
 
 ---
 
-### 7.7 Maintainability
+### 7.7 Output Quality
+
+---
+
+**NFR-018 — API Rate Limiting Policy**  
+`Category: Scalability`
+
+The product SHALL define and document its rate limiting posture for each phase of delivery.
+
+*Acceptance Criteria:*
+- **P1–P2 (MVP):** No rate limiting enforced. API is accessed by a known manual cohort. Concurrent request ceiling defined by NFR-011 (3 concurrent requests).
+- **P3–P5:** Rate limiting strategy SHALL be defined before Phase 3 release — at minimum: per-API-key request throttling to prevent runaway usage from a single consumer
+- **P6 (Web UI):** Per-subscription-tier rate limits SHALL be defined and enforced before Web UI launch, aligned with subscription tier capabilities (Section 10.2)
+- Rate limiting policy SHALL be documented in the API reference before any paying customer is onboarded
+
+---
+
+**NFR-016 — Recommendation Format Compliance**  
+`Category: Output Quality`
+
+All recommendations generated by Mode 1 and Mode 3 SHALL conform to the severity-tiered format defined in FR-012.
+
+*Verification:* Output review — any recommendation lacking a named entity reference or missing required format parts for its severity tier is a quality failure. This requirement must be validated against at least 3 real Dataverse environments before Phase 3 release.
+
+---
+
+**NFR-017 — Confidence Tag Completeness**  
+`Category: Output Quality`
+
+Every AI-generated finding, explanation, and recommendation in Mode 1 and Mode 3 output SHALL carry exactly one confidence tag from the `[VERIFIED]` / `[INFERRED]` / `[ESTIMATED]` taxonomy defined in FR-045.
+
+*Verification:* Output review — any AI-generated statement without a confidence tag is a quality failure. No finding shall carry more than one tag.
+
+---
+
+### 7.8 Maintainability
 
 ---
 
@@ -1158,19 +1501,32 @@ All API endpoint implementations and agent tool call definitions SHALL include a
 
 ### 8.1 Product Modes — Output Structure
 
-**Mode 1 — Documentation Generator — 9-Section Output Document:**
+**Mode 1 — Documentation Generator — Two-Layer Output Document:**
+
+**Executive Layer** (for senior stakeholders — readable in under 10 minutes):
 
 | # | Section | Contents |
 |---|---------|----------|
-| 1 | Executive Summary | Environment name, scan date, complexity rating, total counts, key observations |
-| 2 | Custom Tables | Display name, logical name, solution, AI-inferred purpose, key fields summary, record volume |
-| 3 | Field Catalogue | Every custom field: data type, required level, option set values, plain-English description |
-| 4 | Relationship Map | All custom relationships: type, business meaning, cascade behaviours |
-| 5 | Plugin Analysis | Decompiled logic explained, fields read/written, event/stage, risk flags |
-| 6 | Flow & Workflow Docs | Power Automate flows parsed; classic workflows step-by-step |
-| 7 | JavaScript Analysis | Functions per form, events registered, logic explained, deprecated APIs flagged |
-| 8 | Security Overview | Custom roles, key privilege differences, team configurations |
-| 9 | Recommendations | AI-generated risks, performance concerns, duplicate logic, deprecated API usage |
+| E1 | Environment Narrative | Business process inference, core operational tables named with record counts, logic concentration summary (FR-041) |
+| E2 | Publisher Prefix Summary | Client prefix, Microsoft prefix, ISV prefixes — orients consultant immediately (FR-042) |
+| E3 | Complexity Summary | Complexity rating (Low/Med/High), headline counts: tables, fields, plugins, flows, JavaScript files |
+| E4 | Relationship Diagram | Mermaid entity-relationship diagram — custom data model at a glance (FR-049) |
+| E5 | Top 5 Risks | Highest severity findings from Mode 1 scan in full 5-part recommendation format (FR-047) |
+
+**Technical Reference Layer** (for developers — reference material):
+
+| # | Section | Contents |
+|---|---------|----------|
+| T1 | Custom Tables | Display name, logical name, publisher prefix, 4-signal assessment (recency, relationships, logic coverage, form presence), AI-inferred purpose (FR-001, FR-043) |
+| T2 | Field Catalogue | Every custom field: data type, required level, option set values, plain-English description — grouped by table (FR-002) |
+| T3 | Relationship Map | All custom relationships: type, schema name, cascade behaviours, business meaning (FR-003) |
+| T4 | Plugin Analysis | Per plugin: blast radius classification, execution identity, decompiled logic explained, fields read/written, confidence tags (FR-005, FR-044, FR-048) |
+| T5 | Flow & Workflow Docs | Power Automate flows: trigger, actions, connection owner, inactive owner flag. Classic workflows: step-by-step. Execution identity per item (FR-007, FR-008, FR-048) |
+| T6 | JavaScript Analysis | Functions per form, events registered, logic explained, deprecated APIs flagged (FR-006) |
+| T7 | Security Overview | Custom roles, key privilege differences, over-privilege flags (FR-010) |
+| T8 | Integration Signals | Application users registered in environment with roles (FR-050) |
+| T9 | Recommendations | All AI-generated findings in FR-012 tiered format with confidence tags |
+| T10 | Mermaid Source | Full Mermaid diagram source for copy/paste into any renderer (FR-049) |
 
 ### 8.2 API Endpoints — Complete Reference
 
@@ -1189,11 +1545,11 @@ All API endpoint implementations and agent tool call definitions SHALL include a
 | Phase | Name | Deliverable | FR Coverage | Exit Gate |
 |-------|------|-------------|-------------|-----------|
 | P1 | POC | C# console app connects to Dataverse MCP, asks Claude to list custom tables, prints response. Credential in-memory handling verified. | FR-034 | Pipeline works end-to-end. Credential handling passes code review. |
-| P2 | Mode 1 MVP | Permission checker live. Tables, fields, relationships documented. First real .docx returned. Security role solution shipped. | FR-001–003, FR-011, FR-013, FR-029–040 | First customer receives and validates a generated document. |
-| P3 | Mode 1 Full | Plugin decompilation, JavaScript reading, flow parsing, recommendations section added. | FR-004–012 | Customer confirms output accurately represents 90%+ of environment components. |
+| P2 | Mode 1 MVP | Permission checker live. Tables, fields, relationships documented. First real .docx returned. Security role solution shipped. Publisher prefix intelligence. App user inventory. | FR-001–003, FR-011, FR-013, FR-029–040, FR-042, FR-050 | First customer receives and validates a generated document. |
+| P3 | Mode 1 Full | Plugin decompilation, blast radius classification, JavaScript reading, flow parsing, execution identity, environment narrative, table signal scoring, confidence layer, two-layer output, Mermaid diagram, Top 5 Risks, recommendations in tiered format. | FR-004–012, FR-041, FR-043–049 | Customer confirms output accurately represents 90%+ of environment components. Customer can hand document to client without manual correction. |
 | P4 | Mode 2 | Field Impact Analyser live. Complete trigger map across all logic types. | FR-014–019, FR-037 | First successful field impact query on a real environment. |
-| P5 | Mode 3 | Health Audit live. Full risk scan. Prioritised report card. | FR-020–028, FR-038 | Customer confirms at least 1 Critical or Warning finding is actionable. |
-| P6 | Web UI | Simple frontend. Microsoft OAuth login. Subscription billing. Report history. | FR-041–045 | 5 paying subscribers before Web UI investment begins. |
+| P5 | Mode 3 | Health Audit live. Full risk scan. Prioritised report card. Abandoned plugin detection, zero-record tables, unmanaged solutions, integration table ownership. | FR-020–028, FR-038, FR-051–054 | Customer confirms at least 1 Critical or Warning finding is actionable. |
+| P6 | Web UI | Simple frontend. Microsoft OAuth login. Subscription billing. Report history. | FR-041–045 (Web UI features) | 5 paying subscribers before Web UI investment begins. |
 
 ---
 
