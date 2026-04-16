@@ -31,7 +31,7 @@ This role grants read-only access to exactly 13 metadata entities required by th
 4. Click **Next** → **Import**. Wait for the import to complete.
 5. Verify: navigate to **Settings** → **Security Roles** and confirm **DataverseDocAgent Reader** exists.
 
-Re-importing the solution is safe (idempotent) — it updates the existing role without creating duplicates.
+Re-importing the solution is safe (idempotent) — Dataverse matches by the solution's internal GUID, not the display name, so it updates the existing role without creating duplicates. If you manually created a role named "DataverseDocAgent Reader" outside this solution, both will coexist; delete the manual one before importing.
 
 ### After Import
 
