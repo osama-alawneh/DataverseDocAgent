@@ -701,6 +701,66 @@ So that I can identify which external integrations are writing to this environme
 
 ---
 
+### Story 3.8: Dataverse Connection Factory Consolidation + Tool CancellationToken Propagation
+
+As a developer,
+I want `EnvironmentCredentials`, `DataverseConnectionException`, `IDataverseConnectionFactory`, and `DataverseConnectionFactory` moved into a single shared project referenced by both `DataverseDocAgent.Api` and `DataverseDocAgent.Console`, and `IDataverseTool.ExecuteAsync` extended to accept a `CancellationToken`,
+So that the duplicate copies flagged in Epic 2 retro item T3 stop drifting and the tool pipeline becomes cancellable end-to-end (PREP-4 from the Epic 2 retrospective).
+
+> **Dependency gate:** Must land **before Story 3.4** starts, because Story 3.4 introduces new `IDataverseTool` implementations that would immediately inherit the pre-consolidation signature and require rework.
+
+**Acceptance Criteria:**
+
+**Given** the solution has three projects today (`Api`, `Console`, `Tests`)
+**When** this story is complete
+**Then** a new project `src/DataverseDocAgent.Shared/DataverseDocAgent.Shared.csproj` exists targeting the same TFM as `Api` and `Console`, with `<Nullable>enable</Nullable>` and no executable entry point
+**And** the following types live in `DataverseDocAgent.Shared` under namespace `DataverseDocAgent.Shared.Dataverse` (credentials + exception) and `DataverseDocAgent.Shared.Dataverse` (factory + interface):
+  - `EnvironmentCredentials` (record-like sealed class with 4 required properties and the `[DebuggerBrowsable(Never)]` on `ClientSecret`)
+  - `DataverseConnectionException` (simple `Exception` subclass, ctor with `message` + `innerException`)
+  - `IDataverseConnectionFactory` (with `CancellationToken cancellationToken = default` on `ConnectAsync`)
+  - `DataverseConnectionFactory` (the canonical Api-side implementation)
+**And** both `DataverseDocAgent.Api.csproj` and `DataverseDocAgent.Console.csproj` reference `DataverseDocAgent.Shared.csproj` via `<ProjectReference>`
+**And** the shared project's `DataverseConnectionFactory` preserves every NFR annotation on the existing Api-side copy (NFR-007 credential-logging prohibition, NFR-014 typed exception contract)
+
+**Given** the Console project currently has its own `DataverseConnectionFactory` under namespace `DataverseDocAgent.ConsoleApp.*`
+**When** consolidation is complete
+**Then** `src/DataverseDocAgent.Console/Dataverse/DataverseConnectionFactory.cs` is **deleted**, along with any Console-only copy of `EnvironmentCredentials` or `DataverseConnectionException`
+**And** the Console `Program.cs` resolves the shared factory (either via a new `IServiceCollection` bootstrap or direct `new DataverseConnectionFactory(...)`), using the shared `IDataverseConnectionFactory` interface
+**And** the `DataverseDocAgent.ConsoleApp.*` namespace is no longer used for Dataverse types anywhere in the repo (grep returns zero hits in `src/`)
+
+**Given** the Api currently declares copies under `DataverseDocAgent.Api.Common` / `DataverseDocAgent.Api.Dataverse`
+**When** consolidation is complete
+**Then** the Api-side files `src/DataverseDocAgent.Api/Common/EnvironmentCredentials.cs`, `src/DataverseDocAgent.Api/Common/DataverseConnectionException.cs`, `src/DataverseDocAgent.Api/Dataverse/IDataverseConnectionFactory.cs`, and `src/DataverseDocAgent.Api/Dataverse/DataverseConnectionFactory.cs` are **deleted**
+**And** all Api consumers (`SecurityCheckService`, DI registration in `Program.cs`, any controller, `AgentOrchestrator`, tools) reference the shared types via `using DataverseDocAgent.Shared.Dataverse;`
+**And** the DI registration `builder.Services.AddScoped<IDataverseConnectionFactory, DataverseConnectionFactory>()` in `src/DataverseDocAgent.Api/Program.cs` is updated to bind the shared types
+
+**Given** `IDataverseTool.ExecuteAsync` currently signs as `Task<string> ExecuteAsync(JsonElement input)` (PREP-4)
+**When** this story is complete
+**Then** the signature becomes `Task<string> ExecuteAsync(JsonElement input, CancellationToken cancellationToken = default)`
+**And** the existing implementation `ListCustomTablesTool.ExecuteAsync` accepts the token, and where it already calls into `IOrganizationService` synchronously it documents with a `// F-034 — NFR-007` style comment why the token cannot yet be honoured at SDK level (matches the deferred item in `deferred-work.md`)
+**And** the single call site `src/DataverseDocAgent.Api/Agent/AgentOrchestrator.cs` passes the orchestrator's existing `CancellationToken` parameter through to `tool.ExecuteAsync(inputElement, cancellationToken)`
+**And** any new tools added in Story 3.4 MUST accept the token (enforced at interface level — no override-with-default hack)
+
+**Given** the existing test project `DataverseDocAgent.Tests`
+**When** the consolidation lands
+**Then** all 68 currently-passing tests continue to pass with no behaviour change
+**And** the `Tests` project adds a `<ProjectReference>` to `DataverseDocAgent.Shared.csproj` if it does not already get the types transitively
+**And** a new unit test verifies `ListCustomTablesTool.ExecuteAsync` receives and — at minimum — does not swallow a `CancellationToken` (even if the SDK call itself cannot honour it)
+
+**Given** the refactor touches DI + project references
+**When** a clean build runs (`dotnet build DataverseDocAgent.sln --no-incremental`)
+**Then** zero warnings and zero errors result
+**And** `dotnet test` returns green across the full suite
+**And** a grep for `class DataverseConnectionFactory` in `src/` returns exactly one file (the shared project copy)
+
+**Given** the privacy-policy claim in `docs/privacy-policy.md` about credential handling
+**When** the consolidation lands
+**Then** `CredentialDestructuringPolicy` (if it depends on the Api-side type name) is updated to reference the shared-project type, and a unit test proves Serilog destructuring of the shared `EnvironmentCredentials` still redacts `ClientSecret`
+
+> **T3 (Epic 2 retro), PREP-4 — NFR-007, NFR-014. Closes Epic 2 retro follow-through.**
+
+---
+
 ## Epic 4: Mode 1 Full — Environment Intelligence
 
 **Goal:** Deliver all PRD v4 intelligence features. A Mode 1 document a senior D365 consultant trusts enough to hand directly to a client without reviewing every line.
