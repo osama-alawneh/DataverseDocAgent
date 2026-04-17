@@ -1,5 +1,41 @@
 # Deferred Work
 
+## Deferred from: code review of story-3.1-async-job-infrastructure (2026-04-17)
+
+- **Unbounded `Channel<GenerationTask>` + credential lifetime.** `Channel.CreateUnbounded` never throttles producers and each `GenerationTask` pins a live `EnvironmentCredentials`. Real Story 3.5 pipelines target up to 10 minutes per job, so queue depth × pipeline duration is an in-memory credential residency that isn't bounded. Consider `CreateBounded` with `BoundedChannelFullMode.Wait` and a `JOB_QUEUE_FULL` structured-error path, sized against NFR-011 (3 concurrent). Flag during Story 3.5 when the real pipeline lands and the "held in memory for minutes, not seconds" regime becomes operational.
+- **Host-shutdown drain strategy for in-flight Running jobs.** If `stoppingToken` fires mid-pipeline, `OperationCanceledException` re-throws (correctly, to let `BackgroundService` stop cleanly). The `JobRecord` remains in `Running` and is never flushed to `Failed`/`Cancelled`. In-memory store is lost on restart today, but once a persistent store lands the zombies surface on boot. Add a `Cancelled` status + finally-block flush, or an orphan-reaper on startup.
+- **`JobRecord` has no `ErrorCode`/`SafeToRetry` fields.** NFR-014 requires structured errors with `code` + `safeToRetry` everywhere. Story 3.1's sanitized `ErrorMessage` preserves NFR-007 but flattens the taxonomy architecture §9 defines (`CREDENTIAL_REJECTED`, `PERMISSION_MISSING`, `GENERATION_TIMEOUT`, …). Story 3.5 must extend `JobRecord` + `JobStatusResponse` with nullable `code`/`safeToRetry` populated from typed pipeline exceptions, without re-introducing raw `ex.Message` echoing.
+- **Polling rate-limit for `GET /api/jobs/{jobId}`.** Correctly excluded from Story 3.0's credential-endpoint scope. Unbounded read of an in-memory dictionary is cheap today, but once the store is backed by a cache or database, abusive polling becomes a cost vector. Consider a separate "polling" rate-limit policy in Phase 3, partitioned by jobId (self-limiting — only the owner has the id).
+- **`JobStatus` enum → JSON mapping is a `ToString().ToLowerInvariant()`.** Works for current single-word members; breaks readability for future `CredentialFailure` / `Timeout` (would emit `credentialfailure`). Swap for `JsonStringEnumConverter(JsonNamingPolicy.CamelCase)` on a serialized enum field when adding new members.
+- **`ChannelReader<T>` / `ChannelWriter<T>` DI split.** Producer and consumer currently both take `Channel<GenerationTask>` — either can call `Complete()`. Not load-bearing today; worth tightening when Story 3.5 adds the producer controller.
+- **No contract test for `IGenerationPipeline` cancellation honouring.** A Story 3.5 implementation that ignores `cancellationToken` could leave the background service unresponsive to shutdown. Add a contract test alongside the real pipeline.
+
+## Deferred from: code review of story-3.0-rate-limiting (2026-04-17)
+
+- **Reverse-proxy / null-`RemoteIpAddress` partition collapse.** Behind an LB/proxy, every request carries the proxy IP as `RemoteIpAddress`; null-IP request hosts collapse to the literal `"unknown"` bucket. A single noisy tenant denies service to the whole upstream cohort. P3 deployment story must add `Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders` middleware (before `UseRateLimiter`) and/or move partitioning to issued API keys per ADR-009. Null-IP behaviour is now covered by `PartitionedLimiter_NullRemoteIpAddress_CollapsesToUnknownBucket` to lock the current semantics.
+- **Sprint-level dependency gate on Story 3.5 → done (AC-11).** No code enforces this. Story 3.5 code-review checklist must refuse `done` if Story 3.0 is not `done`.
+- **Window-replenishment / boundary-concurrency test.** `AutoReplenishment = true` on the fixed-window limiter has no direct unit coverage — a regression to `AutoReplenishment = false` would still pass all current tests. Intentionally out of scope for story 3.0 (not in AC-10); revisit if rate-limit regressions surface or when Phase 3 swaps partitioning to API keys.
+- **`/api/health` exemption is implicit, not asserted by test.** Endpoint has no `[EnableRateLimiting]` and no `GlobalLimiter` is configured, so it is exempt today. One future global-limiter flip silently throttles health checks. Add a `DisableRateLimiting`-style lock or an assertion test when Phase 3 introduces a global policy.
+
+## Resolved: T1 middleware body-logging audit (2026-04-17)
+
+Retro item T1 (`ExceptionHandlingMiddleware` body-logging audit) audited in this session via `bmad-code-review`. Findings:
+
+- `ExceptionHandlingMiddleware.InvokeAsync` does **not** read `context.Request.Body` on exception paths — only `_logger.LogError(ex, <literal>)` is called (verified by `ExceptionHandlingMiddlewareTests`, all three cases pass).
+- `CredentialDestructuringPolicy` redacts `EnvironmentCredentials` and `SecurityCheckRequest` when destructured via `{@X}` placeholders.
+- `UseSerilogRequestLogging()` is **not** registered → no automatic request-property enrichment that could embed bound action arguments.
+- `InvalidModelStateResponseFactory` returns validation error messages only, not attempted field values.
+- `DataverseConnectionFactory` strips inner SDK exceptions; `SecurityCheckService` outer-catch returns only sanitized recommendation strings.
+- **Gap fixed:** `Microsoft.PowerPlatform.Dataverse.Client` and `Anthropic` logger namespaces were not clamped. In Development (`MinimumLevel=Debug`) these SDKs could emit authority URLs / tenant IDs / payload bytes at Info/Debug. Added `.MinimumLevel.Override(..., LogEventLevel.Warning)` for both in `Program.cs`.
+
+T1 removed from deferred list. Remaining 2.4 items retained below.
+
+## Deferred from: code review of story-2.4-setup-guide-privacy (2026-04-17)
+
+- `credentials.TenantId` validated via GUID regex on `SecurityCheckRequest` but silently ignored by `DataverseConnectionFactory.ConnectAsync` — `ServiceClient(Uri, clientId, clientSecret, useUniqueInstance)` overload infers tenant from the environment URL. Pre-existing since story 1.2; field is required in API surface but has no effect on authentication. Either remove from required body or wire through.
+- `POST /api/security/check` error responses may echo parts of the credential via SDK exception messages (factory already strips inner exceptions, but controller-level error mapping is unreviewed for secret-adjacent content).
+- GDPR categorical "not a Data Processor" claim in `docs/privacy-policy.md:90-92` — grounded in PRD NFR-012 but legally risky; security-role and workflow payloads can embed user display names / email addresses. Hold pending legal review before public launch.
+
 ## Deferred from: code review of story-2.3-security-role-artefact (2026-04-16)
 
 - No CI/automated validation for zip integrity — no CI infrastructure exists yet; hand-rolled solution XML has no automated check that it remains importable after edits.

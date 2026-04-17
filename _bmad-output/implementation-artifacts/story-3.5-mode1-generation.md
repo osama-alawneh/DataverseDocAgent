@@ -31,12 +31,13 @@ so that the complete request-to-download journey works end-to-end: submit → po
 - [ ] Implement `DocumentGenerateController` (AC: 1, 2)
   - [ ] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateController.cs`
   - [ ] `[HttpPost("api/document/generate")]`
+  - [ ] **NFR-018 — Decorate the generate action with `[EnableRateLimiting(CredentialEndpointsRateLimitOptions.PolicyName)]`** (Story 3.0 AC-4). Action-level, not controller-level. Required for Story 3.0 → `done` gate (AC-11). Add `using DataverseDocAgent.Api.Common;` and `using Microsoft.AspNetCore.RateLimiting;`.
   - [ ] Validate all four credential fields are present and non-empty → return `{ error: "...", code: "INVALID_REQUEST", safeToRetry: false }` if not
   - [ ] Build `EnvironmentCredentials` from request body
   - [ ] Call `IJobStore.CreateJob()` → get `jobId`
   - [ ] Enqueue `GenerationTask { JobId = jobId, Credentials = credentials }` to the `Channel<GenerationTask>`
   - [ ] Return `StatusCode(202, new DocumentGenerateResponse { JobId = jobId })`
-  - [ ] Annotate: `// F-036 — FR-036`
+  - [ ] Annotate: `// F-036 — FR-036` + `// NFR-018 — Rate-limited via "credential-endpoints" policy (Story 3.0)`
 - [ ] Add `GetOrganisationMetadataTool` (AC: 5)
   - [ ] Create `src/DataverseDocAgent.Api/Agent/Tools/GetOrganisationMetadataTool.cs`
   - [ ] `Name = "get_organisation_metadata"`, returns: `{ "environmentName", "environmentUrl", "version", "baseLanguageName" }`
