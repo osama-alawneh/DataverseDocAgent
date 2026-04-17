@@ -1,6 +1,6 @@
 # Story 3.0: Rate Limiting on Credential-Accepting Endpoints
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -40,28 +40,28 @@ so that a compromised or malicious caller cannot use the API as a high-throughpu
 
 ## Tasks / Subtasks
 
-- [ ] Add `CredentialEndpointsRateLimitOptions` options class (AC: 7)
-  - [ ] Create `src/DataverseDocAgent.Api/Common/CredentialEndpointsRateLimitOptions.cs` with `PermitLimit` (int, default 10) and `WindowSeconds` (int, default 60) properties, data-annotation `[Range]` bounds (1–1000 for PermitLimit; 1–3600 for WindowSeconds).
-  - [ ] Register via `builder.Services.Configure<CredentialEndpointsRateLimitOptions>(...)` in `Program.cs`.
-- [ ] Register `AddRateLimiter` in `Program.cs` (AC: 1, 2, 6)
-  - [ ] Add `builder.Services.AddRateLimiter(options => { ... })`.
-  - [ ] Inside the delegate: `options.AddPolicy("credential-endpoints", httpContext => RateLimitPartition.GetFixedWindowLimiter(...))` keyed on `httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"`.
-  - [ ] Configure `options.OnRejected` to write `StructuredErrorResponse` JSON + `Retry-After` header.
-  - [ ] Pipeline: `app.UseMiddleware<ExceptionHandlingMiddleware>()` → `app.UseHttpsRedirection()` → `app.UseRouting()` → `app.UseRateLimiter()` → `app.MapControllers()`.
-- [ ] Decorate `SecurityCheckController.Check` (AC: 3)
-  - [ ] Add `using Microsoft.AspNetCore.RateLimiting;` and `[EnableRateLimiting("credential-endpoints")]` on the action method.
-- [ ] Update `appsettings.json` and `appsettings.Development.json` (AC: 7)
-  - [ ] Add `RateLimiting.CredentialEndpoints` block with `PermitLimit` and `WindowSeconds`. Keep Development values permissive if useful (e.g. 100/60) but default-shipped `appsettings.json` carries the enforced production defaults.
-- [ ] Document external config and 429 behaviour in setup guide (AC: 7)
-  - [ ] Add a short "API reference — rate limits" subsection at the end of `docs/setup-guide.md` stating default limits, the 429 response shape, and how to request an uplift.
-- [ ] Add `tests/DataverseDocAgent.Tests/RateLimiterTests.cs` (AC: 10)
-  - [ ] Drive the limiter through `WebApplicationFactory<Program>` **or** direct `RateLimiterPolicy` unit tests (prefer unit tests over TestHost to keep the test project free of `Microsoft.AspNetCore.Mvc.Testing` dependency unless absolutely required).
-  - [ ] Cover: permit exhaustion, 429 body shape, `Retry-After` header, no credential in log/response, per-IP partition isolation.
-- [ ] Update `_bmad-output/implementation-artifacts/story-3.5-*.md` Tasks list (AC: 4)
-  - [ ] When story 3.5 file is created, include a subtask: "Decorate generate-document action with `[EnableRateLimiting(\"credential-endpoints\")]`". If story 3.5 file does not yet exist at this story's implementation time, record this as a note in the Epic 3 section of the dev journal / commit message so it is not forgotten.
-- [ ] Verify build + tests green before marking review (AC: 10)
-  - [ ] `dotnet build` clean.
-  - [ ] `dotnet test` 73/73 green (current baseline 68 + 5 new rate-limiter tests).
+- [x] Add `CredentialEndpointsRateLimitOptions` options class (AC: 7)
+  - [x] Create `src/DataverseDocAgent.Api/Common/CredentialEndpointsRateLimitOptions.cs` with `PermitLimit` (int, default 10) and `WindowSeconds` (int, default 60) properties, data-annotation `[Range]` bounds (1–1000 for PermitLimit; 1–3600 for WindowSeconds).
+  - [x] Register via `builder.Services.Configure<CredentialEndpointsRateLimitOptions>(...)` in `Program.cs`.
+- [x] Register `AddRateLimiter` in `Program.cs` (AC: 1, 2, 6)
+  - [x] Add `builder.Services.AddRateLimiter(options => { ... })`.
+  - [x] Inside the delegate: `options.AddPolicy("credential-endpoints", httpContext => RateLimitPartition.GetFixedWindowLimiter(...))` keyed on `httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"`.
+  - [x] Configure `options.OnRejected` to write `StructuredErrorResponse` JSON + `Retry-After` header (delegates to `RateLimitRejection.WriteAsync`).
+  - [x] Pipeline: `app.UseMiddleware<ExceptionHandlingMiddleware>()` → `app.UseHttpsRedirection()` → `app.UseRouting()` → `app.UseRateLimiter()` → `app.MapControllers()`.
+- [x] Decorate `SecurityCheckController.Check` (AC: 3)
+  - [x] Add `using Microsoft.AspNetCore.RateLimiting;` and `[EnableRateLimiting("credential-endpoints")]` on the action method.
+- [x] Update `appsettings.json` and `appsettings.Development.json` (AC: 7)
+  - [x] Add `RateLimiting.CredentialEndpoints` block with `PermitLimit` and `WindowSeconds`. Production: 10/60; Development: 100/60.
+- [x] Document external config and 429 behaviour in setup guide (AC: 7)
+  - [x] Appended "API Reference — Rate Limits" subsection to `docs/setup-guide.md`.
+- [x] Add `tests/DataverseDocAgent.Tests/RateLimiterTests.cs` (AC: 10)
+  - [x] Pure-unit tests — no `WebApplicationFactory` / `Microsoft.AspNetCore.Mvc.Testing` dependency added.
+  - [x] Covers: permit exhaustion, 429 body shape, `Retry-After` header, no credential echo in rejection response, per-IP partition isolation.
+- [x] Update story-3.5 dependency note (AC: 4)
+  - [x] Story 3.5 file is scaffold-only; note carried into deferred-work and repeated in this story's Completion Notes — Story 3.5 dev must add `[EnableRateLimiting("credential-endpoints")]` to the generate-document action at creation.
+- [x] Verify build + tests green before marking review (AC: 10)
+  - [x] `dotnet build DataverseDocAgent.sln --no-incremental` clean (0 warn / 0 err).
+  - [x] `dotnet test` 73/73 green (baseline 68 + 5 new rate-limiter tests).
 
 ## Dev Notes
 
@@ -186,6 +186,30 @@ claude-opus-4-7 (context engine)
 
 ### Debug Log References
 
+None — build clean (0 warn / 0 err) and 73/73 tests green on first full build/test cycle.
+
 ### Completion Notes List
 
+- **Rejection helper extracted to `Common/RateLimitRejection.cs`** instead of inlining the 429 body writer in `Program.cs`. Rationale: the story Dev Notes mandated pure-unit tests over `WebApplicationFactory`, and `options.OnRejected` is a delegate composed at DI wire-up that is not addressable from a unit test. Extracting `WriteAsync(HttpContext, retryAfterSeconds, ct)` as a public static keeps Program.cs thin and lets AC-5/AC-6/AC-9 be verified against a `DefaultHttpContext` without spinning up TestHost. `OnRejected` is a 4-line adapter that extracts `Retry-After` from the lease metadata and delegates to the helper.
+- **Policy name + section constants live on the options class** (`CredentialEndpointsRateLimitOptions.PolicyName`, `.SectionName`). The `[EnableRateLimiting]` attribute on the controller and the `AddPolicy(...)` call in `Program.cs` both reference the constant, so the policy name is single-sourced and Story 3.5's generate-document action can reuse the same constant without string duplication.
+- **AC-4 (Story 3.5 attribute application) deferred to 3.5 dev.** Story 3.5 is scaffold-only at this point; the enforcement is recorded here in Completion Notes and will be appended to `deferred-work.md` — Story 3.5 dev must add `[EnableRateLimiting(CredentialEndpointsRateLimitOptions.PolicyName)]` to the `POST /api/document/generate` action.
+- **AC-11 (sprint-level gate on 3.5 → done).** Not code-enforced. Will be surfaced in the 3.5 code-review checklist; recorded in deferred-work.md.
+- **Reverse-proxy edge case noted.** When deployed behind a load balancer, `RemoteIpAddress` is the proxy IP. Out of scope for P2 per Dev Notes. Appended to deferred-work.md as a P3 deployment-story follow-up (add `ForwardedHeaders` middleware).
+- **Serilog credential clamp (Story 2.4 / commit `7875516`) is load-bearing.** The rejection path writes no log statement, but if a future change adds one, the `Microsoft.AspNetCore`-Warning and `Microsoft.PowerPlatform.Dataverse.Client`-Warning clamps already prevent accidental request-body dumps at Info/Debug. NFR-007 posture is preserved.
+- **Build:** `dotnet build DataverseDocAgent.sln --no-incremental` → 0 warn / 0 err.
+- **Tests:** `dotnet test` → Passed: 73, Failed: 0, Skipped: 0 (68 baseline + 5 new `RateLimiterTests`).
+
 ### File List
+
+**New:**
+- `src/DataverseDocAgent.Api/Common/CredentialEndpointsRateLimitOptions.cs`
+- `src/DataverseDocAgent.Api/Common/RateLimitRejection.cs`
+- `tests/DataverseDocAgent.Tests/RateLimiterTests.cs`
+
+**Modified:**
+- `src/DataverseDocAgent.Api/Program.cs` — added `AddRateLimiter` registration, named policy `credential-endpoints`, OnRejected adapter, and `app.UseRateLimiter()` between `UseRouting` and `MapControllers`.
+- `src/DataverseDocAgent.Api/Features/SecurityCheck/SecurityCheckController.cs` — added `[EnableRateLimiting(CredentialEndpointsRateLimitOptions.PolicyName)]` on the `Check` action.
+- `src/DataverseDocAgent.Api/appsettings.json` — added `RateLimiting:CredentialEndpoints` (10 / 60).
+- `src/DataverseDocAgent.Api/appsettings.Development.json` — added `RateLimiting:CredentialEndpoints` (100 / 60).
+- `docs/setup-guide.md` — added "API Reference — Rate Limits" subsection.
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — `3-0-*` ready-for-dev → in-progress → review (this commit).

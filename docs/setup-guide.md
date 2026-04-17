@@ -199,3 +199,27 @@ Note on HTTP status: a successful call to the permission checker always returns 
 Once `safeToRun: true` is returned, your environment is ready. You can now call `POST {API_BASE_URL}/api/document/generate` to produce documentation. See the API reference for full endpoint details.
 
 If you need to revoke DataverseDocAgent access at any point, disable or delete the `DataverseDocAgent-Reader` App Registration in Microsoft Entra ID — this immediately invalidates the service account across every environment it was granted access to.
+
+---
+
+## API Reference — Rate Limits
+
+Credential-accepting endpoints are rate-limited per source IP to contain credential-probing abuse (NFR-018).
+
+**Scope:** `POST /api/security/check` and (once live in Epic 3) `POST /api/document/generate`. The `/api/health` endpoint is not throttled.
+
+**Defaults (production):** 10 requests per 60-second window, per source IP. Fixed window, no queue.
+
+**Configuration:** `appsettings.json` section `RateLimiting:CredentialEndpoints` — `PermitLimit` (1–1000) and `WindowSeconds` (1–3600). Development defaults to 100/60 for local testing. No recompile required to retune.
+
+**Rejection response:** HTTP 429, `Retry-After` header set to whole seconds, body:
+
+```json
+{
+  "error": "Rate limit exceeded. Retry after 60 seconds.",
+  "code": "RATE_LIMIT_EXCEEDED",
+  "safeToRetry": true
+}
+```
+
+**Requesting an uplift:** Raise a platform-operator ticket with the intended client IP range and justification. Phase 3 will move partitioning from source IP to issued API keys per ADR-009.
