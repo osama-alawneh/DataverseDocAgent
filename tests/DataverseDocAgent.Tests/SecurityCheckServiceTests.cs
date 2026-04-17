@@ -13,9 +13,9 @@ public class SecurityCheckServiceTests
     // ── RequiredPrivileges ────────────��───────────────────────────────────────
 
     [Fact]
-    public void RequiredPrivileges_HasExactly13Entries()
+    public void RequiredPrivileges_HasExactly12Entries()
     {
-        Assert.Equal(13, SecurityCheckService.RequiredPrivileges.Count);
+        Assert.Equal(12, SecurityCheckService.RequiredPrivileges.Count);
     }
 
     [Theory]
@@ -28,9 +28,8 @@ public class SecurityCheckServiceTests
     [InlineData("Read WebResource")]
     [InlineData("Read Workflow")]
     [InlineData("Read Role")]
-    [InlineData("Read RolePrivilege")]
     [InlineData("Read SystemForm")]
-    [InlineData("Read SavedQuery")]
+    [InlineData("Read Query")]
     [InlineData("Read Organization")]
     public void RequiredPrivileges_ContainsExpectedPrivilege(string expected)
     {
@@ -49,9 +48,8 @@ public class SecurityCheckServiceTests
     [InlineData("prvReadWebResource", "Read WebResource")]
     [InlineData("prvReadWorkflow", "Read Workflow")]
     [InlineData("prvReadRole", "Read Role")]
-    [InlineData("prvReadRolePrivilege", "Read RolePrivilege")]
     [InlineData("prvReadSystemForm", "Read SystemForm")]
-    [InlineData("prvReadSavedQuery", "Read SavedQuery")]
+    [InlineData("prvReadQuery", "Read Query")]
     [InlineData("prvReadOrganization", "Read Organization")]
     public void MapPrivilegeName_Read_MapsCorrectly(string input, string expected)
     {
@@ -101,7 +99,7 @@ public class SecurityCheckServiceTests
             SecurityCheckService.RequiredPrivileges,
             SecurityCheckService.RequiredPrivileges);
 
-        Assert.Equal(13, passed.Length);
+        Assert.Equal(12, passed.Length);
         Assert.Empty(missing);
         Assert.Empty(extra);
     }
@@ -119,7 +117,7 @@ public class SecurityCheckServiceTests
 
         Assert.Contains("Read PluginAssembly", missing);
         Assert.DoesNotContain("Read PluginAssembly", passed);
-        Assert.Equal(12, passed.Length);
+        Assert.Equal(11, passed.Length);
     }
 
     [Fact]
@@ -139,6 +137,41 @@ public class SecurityCheckServiceTests
     }
 
     [Fact]
+    public void ComputePrivilegeSets_SharePointBaseline_NotReportedInExtra()
+    {
+        // SharePoint Document Management Integration auto-grants these 4 privileges
+        // to every security role in SharePoint-enabled envs. Dataverse refuses removal.
+        // They must not surface as false-positive extras.
+        var userPrivileges = SecurityCheckService.RequiredPrivileges
+            .Concat(SecurityCheckService.KnownHarmlessExtraPrivileges)
+            .ToList();
+
+        var (passed, missing, extra) = SecurityCheckService.ComputePrivilegeSets(
+            userPrivileges,
+            SecurityCheckService.RequiredPrivileges);
+
+        Assert.Equal(12, passed.Length);
+        Assert.Empty(missing);
+        Assert.Empty(extra);
+    }
+
+    [Fact]
+    public void ComputePrivilegeSets_SharePointPlusRealExtra_OnlyRealInExtra()
+    {
+        var userPrivileges = SecurityCheckService.RequiredPrivileges
+            .Concat(SecurityCheckService.KnownHarmlessExtraPrivileges)
+            .Concat(["Write Contact"])
+            .ToList();
+
+        var (_, _, extra) = SecurityCheckService.ComputePrivilegeSets(
+            userPrivileges,
+            SecurityCheckService.RequiredPrivileges);
+
+        Assert.Single(extra);
+        Assert.Contains("Write Contact", extra);
+    }
+
+    [Fact]
     public void ComputePrivilegeSets_CaseInsensitive_RequiredMatch()
     {
         // Dataverse might return different casing
@@ -150,7 +183,7 @@ public class SecurityCheckServiceTests
             userPrivileges,
             SecurityCheckService.RequiredPrivileges);
 
-        Assert.Equal(13, passed.Length);
+        Assert.Equal(12, passed.Length);
         Assert.Empty(missing);
         // Verify passed contains original-cased values, not uppercased input
         foreach (var required in SecurityCheckService.RequiredPrivileges)

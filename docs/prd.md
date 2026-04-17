@@ -408,11 +408,12 @@ Published to customers before they connect their first environment. Goal: a lock
 | SdkMessageProcessingStep | Read | Read which events each plugin is registered on | Never |
 | WebResource | Read | Retrieve JavaScript source code | Never |
 | Workflow | Read | Read flow and workflow definitions | Never |
-| Role | Read | List all custom security roles | Never |
-| RolePrivilege | Read | Read privileges assigned to each security role | Never |
+| Role | Read | List all custom security roles and their assigned privileges (covers the `roleprivileges` intersect table implicitly — Dataverse has no standalone `prvReadRolePrivilege`) | Never |
 | SystemForm | Read | Read form definitions for JavaScript registration map | Never |
-| SavedQuery | Read | Read view definitions for field impact analysis | Never |
+| SavedQuery (View) | Read | Read view definitions for field impact analysis. Privilege name is `prvReadQuery` — Dataverse drops the "Saved" prefix on the privilege while keeping it on the entity | Never |
 | Organization | Read | Read basic environment metadata for report header | Never |
+
+> **Note on SharePoint baseline privileges:** In environments with SharePoint Document Management Integration enabled, Dataverse auto-grants `prvCreateSharePointData`, `prvReadSharePointData`, `prvWriteSharePointData`, and `prvReadSharePointDocument` to every security role and refuses manual removal. The permission checker treats these as harmless baseline and does not surface them as `extra[]`. The tool never reads or writes SharePoint entities.
 
 ### 5.5 Permission Checker — Endpoint Specification
 

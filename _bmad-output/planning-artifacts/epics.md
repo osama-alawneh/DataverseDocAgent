@@ -338,7 +338,7 @@ So that I can verify the account has exactly the right permissions before connec
 **When** the endpoint is called with a correctly configured DataverseDocAgent Reader service account
 **Then** the response returns HTTP 200 with `status: "ready"`, `safeToRun: true`, a populated `passed[]` array, empty `missing[]` and `extra[]`, and a recommendation string confirming safe to run
 **And** the response is returned within 10 seconds (NFR-002)
-**And** all 13 required privileges from PRD Section 5.4 are checked and reported individually in `passed[]`
+**And** all 12 required privileges from PRD Section 5.4 are checked and reported individually in `passed[]`
 
 **Given** the service account is missing one or more required permissions
 **When** POST /api/security/check is called
@@ -361,7 +361,7 @@ So that I can verify the account has exactly the right permissions before connec
 
 As a D365 consultant,
 I want to download and import a pre-built Dataverse solution containing the DataverseDocAgent Reader security role,
-So that I can establish least-privilege access without manually configuring 13 individual privileges.
+So that I can establish least-privilege access without manually configuring 12 individual privileges.
 
 **Acceptance Criteria:**
 
@@ -369,7 +369,7 @@ So that I can establish least-privilege access without manually configuring 13 i
 **When** the solution is imported into any Dynamics 365 / Dataverse cloud environment via make.powerapps.com → Solutions → Import Solution
 **Then** the import completes without error
 **And** a security role named "DataverseDocAgent Reader" is created in the environment
-**And** the role contains exactly the 13 privileges listed in PRD Section 5.4 — no additions, no omissions
+**And** the role contains exactly the 12 privileges listed in PRD Section 5.4 — no additions, no omissions
 **And** re-importing the solution (idempotency test) does not create a duplicate role or corrupt the existing role
 **And** running POST /api/security/check against an environment where only this role is assigned returns `status: "ready"` with an empty `extra[]` array
 

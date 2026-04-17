@@ -11,8 +11,10 @@ namespace DataverseDocAgent.Api.Features.SecurityCheck;
 
 public sealed class SecurityCheckService
 {
-    // F-029, F-030, F-031 — All 13 required privileges (PRD Section 5.4)
+    // F-029, F-030, F-031 — All 12 required privileges (PRD Section 5.4)
     // All three modes require identical permissions.
+    // Read Role covers the roleprivileges intersect table implicitly — Dataverse
+    // has no standalone prvReadRolePrivilege.
     public static readonly IReadOnlyList<string> RequiredPrivileges =
     [
         "Read Entity",
@@ -24,10 +26,23 @@ public sealed class SecurityCheckService
         "Read WebResource",
         "Read Workflow",
         "Read Role",
-        "Read RolePrivilege",
         "Read SystemForm",
-        "Read SavedQuery",
+        "Read Query",
         "Read Organization",
+    ];
+
+    // Privileges that Dataverse auto-grants to every security role when the
+    // SharePoint Document Management Integration feature is enabled on an env.
+    // They cannot be removed via the role editor or by editing customizations.xml
+    // (Dataverse re-adds them on import). Harmless for this tool — document
+    // generation never touches SharePoint entities. Excluded from extra[] so the
+    // checker does not surface false-positive "remove these" recommendations.
+    public static readonly IReadOnlyList<string> KnownHarmlessExtraPrivileges =
+    [
+        "Read SharePointData",
+        "Write SharePointData",
+        "Create SharePointData",
+        "Read SharePointDocument",
     ];
 
     private readonly IDataverseConnectionFactory _connectionFactory;
@@ -80,9 +95,11 @@ public sealed class SecurityCheckService
         {
             try
             {
-                // Step 2 — Resolve application user's systemuserid
-                var systemUserId = await GetApplicationUserIdAsync(
-                    client, request.ClientId!, linkedCts.Token);
+                // Step 2 — Resolve caller's own systemuserid via WhoAmI.
+                // Cannot query the systemuser entity directly — that requires prvReadUser,
+                // which is intentionally NOT in the DataverseDocAgent Reader role (PRD 5.4
+                // lists exactly 12 privileges, Read User is not among them).
+                var systemUserId = await GetCallerUserIdAsync(client, linkedCts.Token);
 
                 // Step 3 — Retrieve all privilege names for that user
                 var userPrivilegeNames = await GetUserPrivilegeNamesAsync(
@@ -124,11 +141,12 @@ public sealed class SecurityCheckService
     {
         var userSet     = new HashSet<string>(userPrivilegeNames, StringComparer.OrdinalIgnoreCase);
         var requiredSet = new HashSet<string>(requiredPrivileges, StringComparer.OrdinalIgnoreCase);
+        var ignoredSet  = new HashSet<string>(KnownHarmlessExtraPrivileges, StringComparer.OrdinalIgnoreCase);
 
         var passed  = requiredPrivileges.Where(p => userSet.Contains(p)).ToArray();
         var missing = requiredPrivileges.Where(p => !userSet.Contains(p)).ToArray();
         var extra   = userPrivilegeNames
-            .Where(p => !requiredSet.Contains(p))
+            .Where(p => !requiredSet.Contains(p) && !ignoredSet.Contains(p))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -227,23 +245,16 @@ public sealed class SecurityCheckService
 
     // ── Private Dataverse helpers ──────────────────────────────────────────────
 
-    private static async Task<Guid> GetApplicationUserIdAsync(
+    private static async Task<Guid> GetCallerUserIdAsync(
         ServiceClient client,
-        string clientId,
         CancellationToken cancellationToken)
     {
-        var query = new QueryExpression("systemuser")
-        {
-            ColumnSet = new ColumnSet("systemuserid"),
-        };
-        query.Criteria.AddCondition("applicationid", ConditionOperator.Equal, new Guid(clientId));
+        var response = (WhoAmIResponse)await client.ExecuteAsync(new WhoAmIRequest(), cancellationToken);
 
-        var result = await client.RetrieveMultipleAsync(query, cancellationToken);
+        if (response.UserId == Guid.Empty)
+            throw new InvalidOperationException("WhoAmI returned an empty UserId for the supplied credentials.");
 
-        if (result.Entities.Count == 0)
-            throw new InvalidOperationException("No application user found for the supplied client ID.");
-
-        return result.Entities[0].Id;
+        return response.UserId;
     }
 
     private static async Task<IReadOnlyList<string>> GetUserPrivilegeNamesAsync(
