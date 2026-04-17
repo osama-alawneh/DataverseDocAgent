@@ -1,10 +1,13 @@
-// DataverseDocAgent.Api — Production-ready API host (Story 2.1, 2.2, 3.0)
-// NFR-009 (HTTPS), NFR-014 (error handling), NFR-007 (logging), NFR-006 (health), NFR-018 (rate limiting)
+// DataverseDocAgent.Api — Production-ready API host (Story 2.1, 2.2, 3.0, 3.1)
+// NFR-009 (HTTPS), NFR-014 (error handling), NFR-007 (logging), NFR-006 (health),
+// NFR-018 (rate limiting), F-036 (async jobs)
 
+using System.Threading.Channels;
 using System.Threading.RateLimiting;
 using DataverseDocAgent.Api.Common;
 using DataverseDocAgent.Api.Dataverse;
 using DataverseDocAgent.Api.Features.SecurityCheck;
+using DataverseDocAgent.Api.Jobs;
 using DataverseDocAgent.Api.Middleware;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -54,6 +57,15 @@ builder.Services.AddEndpointsApiExplorer();
 // F-029, F-030, F-031 — Permission checker services (Story 2.2)
 builder.Services.AddScoped<IDataverseConnectionFactory, DataverseConnectionFactory>();
 builder.Services.AddScoped<SecurityCheckService>();
+
+// F-036 — Async job infrastructure (Story 3.1).
+// Channel and IJobStore are singletons so the HTTP controller (producer) and the
+// background service (consumer) share the same instance for the lifetime of the process.
+// IGenerationPipeline is the stub in Phase 2; Story 3.5 swaps this registration.
+builder.Services.AddSingleton<IJobStore, InMemoryJobStore>();
+builder.Services.AddSingleton(Channel.CreateUnbounded<GenerationTask>());
+builder.Services.AddSingleton<IGenerationPipeline, StubGenerationPipeline>();
+builder.Services.AddHostedService<GenerationBackgroundService>();
 
 // NFR-018, NFR-014, NFR-007 — Rate limiting on credential-accepting endpoints (Story 3.0)
 // Fail-fast config binding: ValidateOnStart surfaces out-of-range PermitLimit/WindowSeconds

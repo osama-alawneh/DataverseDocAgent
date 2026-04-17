@@ -1,5 +1,5 @@
 # generated: 2026-04-13
-# last_updated: 2026-04-17 (story 3-0 rate-limiting reviewed → done)
+# last_updated: 2026-04-17 (story 3-1 async-job-infrastructure → review)
 # project: DataverseDocAgent
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-13
-last_updated: 2026-04-17 (story 3-0 rate-limiting reviewed → done)
+last_updated: 2026-04-17 (story 3-1 async-job-infrastructure → review)
 project: DataverseDocAgent
 project_key: NOKEY
 tracking_system: file-system
@@ -61,7 +61,7 @@ development_status:
   # Epic 3: Mode 1 Core — Tables, Fields, Relationships, and .docx
   epic-3: in-progress
   3-0-rate-limiting-on-credential-accepting-endpoints: done
-  3-1-async-job-infrastructure-job-store-background-service: ready-for-dev
+  3-1-async-job-infrastructure-job-store-background-service: review
   3-2-idocumentstore-in-memory-implementation-phase-1: ready-for-dev
   3-3-get-api-download-token-endpoint: ready-for-dev
   3-4-dataverse-tools-tables-fields-relationships: ready-for-dev
