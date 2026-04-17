@@ -9,6 +9,7 @@ using DataverseDocAgent.Api.Features.SecurityCheck;
 using DataverseDocAgent.Shared.Dataverse;
 using DataverseDocAgent.Api.Jobs;
 using DataverseDocAgent.Api.Middleware;
+using DataverseDocAgent.Api.Storage;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
@@ -69,6 +70,14 @@ builder.Services.AddSingleton<IJobStore, InMemoryJobStore>();
 builder.Services.AddSingleton(_ => Channel.CreateUnbounded<GenerationTask>());
 builder.Services.AddSingleton<IGenerationPipeline, StubGenerationPipeline>();
 builder.Services.AddHostedService<GenerationBackgroundService>();
+
+// F-040, NFR-013 — Document store (Story 3.2, Phase 1).
+// IMemoryCache is itself a singleton; the store holds a reference to it, so the
+// store must also be a singleton. AddScoped here would silently leak per-request
+// instances while appearing to work because IMemoryCache state is still shared.
+// Phase 2+: swap to BlobDocumentStore here — no other code changes required (AC-3).
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<IDocumentStore, InMemoryDocumentStore>();
 
 // NFR-018, NFR-014, NFR-007 — Rate limiting on credential-accepting endpoints (Story 3.0)
 // Fail-fast config binding: ValidateOnStart surfaces out-of-range PermitLimit/WindowSeconds

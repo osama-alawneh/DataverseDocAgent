@@ -1,6 +1,6 @@
 # Story 3.2: IDocumentStore — In-Memory Implementation (Phase 1)
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -18,30 +18,30 @@ so that the download endpoint can retrieve documents by token without any extern
 
 ## Tasks / Subtasks
 
-- [ ] Define `IDocumentStore` interface (AC: 1, 3)
-  - [ ] Create `src/DataverseDocAgent.Api/Storage/IDocumentStore.cs`
-  - [ ] `Task<string> StoreAsync(byte[] documentBytes, TimeSpan ttl)`
-  - [ ] `Task<byte[]?> RetrieveAsync(string token)`
-- [ ] Implement `InMemoryDocumentStore` (AC: 2, 5)
-  - [ ] Create `src/DataverseDocAgent.Api/Storage/InMemoryDocumentStore.cs`
-  - [ ] Constructor: inject `IMemoryCache`
-  - [ ] `StoreAsync`:
+- [x] Define `IDocumentStore` interface (AC: 1, 3)
+  - [x] Create `src/DataverseDocAgent.Api/Storage/IDocumentStore.cs`
+  - [x] `Task<string> StoreAsync(byte[] documentBytes, TimeSpan ttl)`
+  - [x] `Task<byte[]?> RetrieveAsync(string token)`
+- [x] Implement `InMemoryDocumentStore` (AC: 2, 5)
+  - [x] Create `src/DataverseDocAgent.Api/Storage/InMemoryDocumentStore.cs`
+  - [x] Constructor: inject `IMemoryCache`
+  - [x] `StoreAsync`:
     - Generate `token = Guid.NewGuid().ToString("N")` (no hyphens, URL-safe)
     - `_cache.Set(token, documentBytes, new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = ttl })`
     - Return `token`
-  - [ ] `RetrieveAsync`:
+  - [x] `RetrieveAsync`:
     - `_cache.TryGetValue(token, out byte[]? bytes)` → return `bytes` (null if not found or expired)
-  - [ ] Annotate: `// F-040 — FR-040, NFR-013`
-- [ ] Create `BlobDocumentStore` stub (AC: 3)
-  - [ ] Create `src/DataverseDocAgent.Api/Storage/BlobDocumentStore.cs` — stub only, `throw new NotImplementedException()`
-  - [ ] Comment: `// Phase 2+ implementation — replace InMemoryDocumentStore registration in Program.cs`
-- [ ] Register in DI (AC: 4)
-  - [ ] In `Program.cs`: `builder.Services.AddMemoryCache()` (if not already registered)
-  - [ ] `builder.Services.AddSingleton<IDocumentStore, InMemoryDocumentStore>()`
-  - [ ] Comment above the registration: `// Phase 2+: swap to BlobDocumentStore here`
-- [ ] Manual test (AC: 2)
-  - [ ] Unit-test or manual verify: store bytes → retrieve within TTL → returns bytes
-  - [ ] Store bytes → wait for TTL → retrieve → returns null (or use a short TTL in test)
+  - [x] Annotate: `// F-040 — FR-040, NFR-013`
+- [x] Create `BlobDocumentStore` stub (AC: 3)
+  - [x] Create `src/DataverseDocAgent.Api/Storage/BlobDocumentStore.cs` — stub only, `throw new NotImplementedException()`
+  - [x] Comment: `// Phase 2+ implementation — replace InMemoryDocumentStore registration in Program.cs`
+- [x] Register in DI (AC: 4)
+  - [x] In `Program.cs`: `builder.Services.AddMemoryCache()` (if not already registered)
+  - [x] `builder.Services.AddSingleton<IDocumentStore, InMemoryDocumentStore>()`
+  - [x] Comment above the registration: `// Phase 2+: swap to BlobDocumentStore here`
+- [x] Manual test (AC: 2)
+  - [x] Unit-test or manual verify: store bytes → retrieve within TTL → returns bytes
+  - [x] Store bytes → wait for TTL → retrieve → returns null (or use a short TTL in test)
 
 ## Dev Notes
 
@@ -77,4 +77,17 @@ claude-sonnet-4-6
 
 ### Completion Notes List
 
+- All five acceptance criteria satisfied. `IDocumentStore` exposes exactly the two asynchronous members specified (AC-1); `InMemoryDocumentStore` delegates to `IMemoryCache` with `AbsoluteExpirationRelativeToNow = ttl` so retention is enforced without a cleanup job, and `RetrieveAsync` returns `null` for both unknown and expired tokens instead of throwing (AC-2); the stubbed `BlobDocumentStore` proves the interface-swap contract so Phase 2 only edits the DI line in `Program.cs` (AC-3); registration is a single `AddSingleton<IDocumentStore, InMemoryDocumentStore>()` alongside `AddMemoryCache()` (AC-4); and the store never inspects document bytes — empty arrays round-trip and null input is rejected with `ArgumentNullException` at the boundary (AC-5).
+- Picked `AddSingleton` over `AddScoped` deliberately. `IMemoryCache` is itself a singleton; scoping the store would create a fresh wrapper per HTTP request that still reads the same cache but obscures ownership, and any future store that holds additional state would silently leak it across requests. Spec's Dev Notes call this out explicitly.
+- Null-input contract: chose to throw `ArgumentNullException` from `StoreAsync` on null bytes rather than silently swallow. The parameter is typed as non-nullable `byte[]`; a null slip-through would almost certainly indicate an upstream bug in the generation pipeline. Empty arrays still round-trip cleanly, so legitimate zero-length documents are not blocked.
+- Test count delta: +7 new tests (baseline 92 → 99). Suite passes `0 Warning(s) 0 Error(s)` on `dotnet build DataverseDocAgent.sln --no-incremental` and `Failed: 0, Passed: 99` on `dotnet test DataverseDocAgent.sln --no-build`.
+- NFR-013 audit: `MemoryCacheEntryOptions.AbsoluteExpirationRelativeToNow` is set to the caller-supplied TTL, not `SlidingExpiration`, so the 24-hour cap cannot be reset by repeated `RetrieveAsync` calls. Confirmed by the `RetrieveAsync_AfterTtlElapsed_ReturnsNull` test.
+- NFR-007 audit: trivially clean. The store handles opaque `byte[]` payloads and never touches connection strings, secrets, or credential material. No log lines emitted on any code path.
+
 ### File List
+
+- Added: `src/DataverseDocAgent.Api/Storage/IDocumentStore.cs`
+- Added: `src/DataverseDocAgent.Api/Storage/InMemoryDocumentStore.cs`
+- Added: `src/DataverseDocAgent.Api/Storage/BlobDocumentStore.cs`
+- Added: `tests/DataverseDocAgent.Tests/InMemoryDocumentStoreTests.cs`
+- Modified: `src/DataverseDocAgent.Api/Program.cs`
