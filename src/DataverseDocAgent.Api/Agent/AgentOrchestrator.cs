@@ -105,6 +105,13 @@ public sealed class AgentOrchestrator
                         {
                             resultJson = await tool.ExecuteAsync(inputElement, ct).ConfigureAwait(false);
                         }
+                        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                        {
+                            // Caller cancellation must short-circuit the loop — swallowing it
+                            // into a tool_result JSON would keep the agent pumping tokens past
+                            // the deadline and defeat the orchestrator's cancellation contract.
+                            throw;
+                        }
                         catch (Exception ex)
                         {
                             resultJson = JsonSerializer.Serialize(new { error = $"Tool '{block.Name}' failed: {ex.GetType().Name}" });

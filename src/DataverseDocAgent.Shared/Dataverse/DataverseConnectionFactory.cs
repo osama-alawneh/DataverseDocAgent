@@ -46,6 +46,15 @@ public sealed class DataverseConnectionFactory : IDataverseConnectionFactory
         {
             await client.ExecuteAsync(new WhoAmIRequest(), cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Caller cancellation must propagate as OperationCanceledException so hosted
+            // services and request-scoped callers can distinguish shutdown / timeout from
+            // an actual connection failure. Inner exception is not wrapped — OCE carries
+            // no credential content.
+            client.Dispose();
+            throw;
+        }
         catch
         {
             client.Dispose();

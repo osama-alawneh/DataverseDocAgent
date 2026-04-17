@@ -17,6 +17,24 @@
 - **Window-replenishment / boundary-concurrency test.** `AutoReplenishment = true` on the fixed-window limiter has no direct unit coverage — a regression to `AutoReplenishment = false` would still pass all current tests. Intentionally out of scope for story 3.0 (not in AC-10); revisit if rate-limit regressions surface or when Phase 3 swaps partitioning to API keys.
 - **`/api/health` exemption is implicit, not asserted by test.** Endpoint has no `[EnableRateLimiting]` and no `GlobalLimiter` is configured, so it is exempt today. One future global-limiter flip silently throttles health checks. Add a `DisableRateLimiting`-style lock or an assertion test when Phase 3 introduces a global policy.
 
+## Resolved: story 3.8 dataverse-connection-factory consolidation (2026-04-17)
+
+Commit `d40df56` (+ review patches) closes the following previously deferred items by moving `EnvironmentCredentials`, `DataverseConnectionException`, `IDataverseConnectionFactory`, and `DataverseConnectionFactory` into a single shared project `DataverseDocAgent.Shared` (namespace `DataverseDocAgent.Shared.Dataverse`) and by extending `IDataverseTool.ExecuteAsync` with a `CancellationToken` parameter that `AgentOrchestrator` propagates:
+
+- **Story 1.2 — "Duplicate class divergence risk."** Resolved. Single canonical `DataverseConnectionFactory` under Shared; Api, Console, and Tests all reference it. Grep `class DataverseConnectionFactory` in `src/` returns exactly one hit.
+- **Story 1.2 — "No CancellationToken support in ConnectAsync."** Resolved. `IDataverseConnectionFactory.ConnectAsync` now takes `CancellationToken cancellationToken = default`; the implementation propagates it to `ServiceClient.ExecuteAsync(WhoAmIRequest, ct)` and rethrows `OperationCanceledException` without wrapping so hosted-service cancellation semantics remain intact.
+- **Story 1.3 — "D1: CancellationToken not propagated to IDataverseTool.ExecuteAsync."** Resolved. `IDataverseTool.ExecuteAsync(JsonElement input, CancellationToken cancellationToken = default)`; `AgentOrchestrator` passes its existing `ct` through; `ListCustomTablesTool` observes the token at the pre-SDK boundary via `ThrowIfCancellationRequested()`. (Story 1.3 F4 — SDK-level cancellation — remains open and is called out in `ListCustomTablesTool.cs` with a direct reference to this deferred item.)
+- **Story 2.2 — "Console project `DataverseConnectionFactory` does not implement `IDataverseConnectionFactory` and lacks `CancellationToken` parameter."** Resolved. The divergent Console copy and its `DataverseDocAgent.ConsoleApp.*` namespaces are deleted; Console now constructs the shared factory (`new DataverseConnectionFactory()`) and receives the interface contract for free.
+
+The following remain deferred and are not addressed by this story:
+
+- Credentials stored as plain managed strings (story 1.2) — unchanged, .NET language-level limitation.
+- `ServiceClient` constructor is synchronous despite async caller (story 1.2) — unchanged, SDK-level limitation.
+- No `[JsonIgnore]` / serialization guard attributes on `EnvironmentCredentials` (story 1.2) — unchanged, documentation-only contract.
+- `EnvironmentUrl` scheme/format not validated in `Console/Program.cs` (story 1.2) — unchanged.
+- Story 1.3 F1/F2/F3/F5/F6 — unchanged, all POC-layer concerns.
+- Story 1.3 F4 — `ListCustomTablesTool` wraps the synchronous `IOrganizationService.Execute` — acknowledged in code comment, SDK boundary fix deferred.
+
 ## Resolved: T1 middleware body-logging audit (2026-04-17)
 
 Retro item T1 (`ExceptionHandlingMiddleware` body-logging audit) audited in this session via `bmad-code-review`. Findings:
@@ -48,7 +66,7 @@ T1 removed from deferred list. Remaining 2.4 items retained below.
 - No rate limiting on `POST /api/security/check` — endpoint accepts raw credentials and connects to external Dataverse environments; usable as credential validation oracle or outbound proxy. Cross-cutting concern; address at API-level with `Microsoft.AspNetCore.RateLimiting` middleware.
 - `TargetMode` not validated against allowed values ("mode1"|"mode2"|"mode3"|"all") — story explicitly says accept-and-ignore for MVP since all modes share identical privileges.
 - `"degraded"` status from PRD Section 5.5 / FR-029 not implemented — story scope only covers `"ready"` and `"blocked"`. Document as known gap; implement when mode-specific privilege requirements diverge.
-- Console project `DataverseConnectionFactory` does not implement `IDataverseConnectionFactory` and lacks `CancellationToken` parameter — two implementations will drift. Pre-existing divergence; consolidate via shared project in Phase 2.
+- ~~Console project `DataverseConnectionFactory` does not implement `IDataverseConnectionFactory` and lacks `CancellationToken` parameter~~ — resolved by story 3.8; see "Resolved: story 3.8" section above.
 - `RetrieveMultipleAsync` does not handle paging and `ConditionOperator.In` may hit Dataverse query size limits with very large privilege sets — theoretical for standard security roles (100-300 privileges). Monitor in integration testing.
 
 ## Deferred from: code review of story-2.1-api-project-setup (2026-04-16)
@@ -79,7 +97,7 @@ T1 removed from deferred list. Remaining 2.4 items retained below.
 
 ## Deferred from: code review of story-1.3-claude-agent-poc (2026-04-15)
 
-- D1: CancellationToken not propagated to IDataverseTool.ExecuteAsync — no cancellable host context until GenerationBackgroundService in Story 3.1; adding now has zero practical effect in a single-run console POC. Revisit when Story 3.1 lands.
+- ~~D1: CancellationToken not propagated to IDataverseTool.ExecuteAsync~~ — resolved by story 3.8; see "Resolved: story 3.8" section above.
 - F1: ExtractText returns only first TextContent block — multi-block Claude responses silently drop remaining content. POC scope limitation; revisit when response aggregation matters.
 - F2: FindTool uses StringComparison.Ordinal — a case mismatch from Anthropic API would silently return unknown-tool error. API always returns exact registered names; harden in Phase 2.
 - F3: dnlib referenced in DataverseDocAgent.Api.csproj with no visible usage in story 1.3 — planned for future stories; audit and remove if still unused after epic 3.
@@ -91,7 +109,7 @@ T1 removed from deferred list. Remaining 2.4 items retained below.
 
 - Credentials stored as plain managed strings — `ClientSecret` and all credentials are heap-allocated `string` objects; not zeroed on scope exit. `SecureString` deprecated in .NET 6+. No practical replacement until OS-level secure memory APIs. Known language limitation.
 - ServiceClient constructor is synchronous despite async caller — `new ServiceClient(Uri, string, string, bool)` performs OAuth token acquisition synchronously, blocking a thread pool thread. No async constructor overload exists in `Microsoft.PowerPlatform.Dataverse.Client` v1.2.10.
-- Duplicate class divergence risk — `EnvironmentCredentials`, `DataverseConnectionException`, `DataverseConnectionFactory` are copy-pasted across Api and Console with no shared project. Phase 2 shared project extraction planned per Dev Notes.
+- ~~Duplicate class divergence risk~~ — resolved by story 3.8; see "Resolved: story 3.8" section above.
 - No serialization guard attributes on EnvironmentCredentials — "must never be serialized" contract is documentation-only; no `[JsonIgnore]` or similar type-system enforcement. Address in Phase 2 hardening.
-- No CancellationToken support in ConnectAsync — hung Dataverse endpoint or slow token acquisition cannot be cancelled. Explicitly out of POC scope.
+- ~~No CancellationToken support in ConnectAsync~~ — resolved by story 3.8; see "Resolved: story 3.8" section above.
 - EnvironmentUrl scheme/format not validated in Program.cs — non-HTTPS or malformed URLs produce a generic error with no diagnostic hint. Acceptable for POC test runner; validate in Phase 2 API layer.

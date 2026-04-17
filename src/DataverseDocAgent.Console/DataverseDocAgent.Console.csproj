@@ -12,7 +12,9 @@
   <ItemGroup>
     <PackageReference Include="Anthropic.SDK" Version="5.10.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="8.0.1" />
-    <PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.2.10" />
+    <!-- Microsoft.PowerPlatform.Dataverse.Client flows transitively via the Shared
+         ProjectReference below; direct reference removed to avoid version drift when
+         no Central Package Management is in use. Shared is the single source of truth. -->
   </ItemGroup>
 
   <ItemGroup>
