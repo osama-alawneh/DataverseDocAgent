@@ -1,8 +1,8 @@
 # DataverseDocAgent Artefacts
 
-## DataverseDocAgent_SecurityRole.zip
+## DataverseDocAgentSecurityRole_1_0_0_6_managed.zip
 
-Dataverse **unmanaged** solution containing the **DataverseDocAgent Reader** security role.
+Dataverse **managed** solution containing the **DataverseDocAgent Reader** security role.
 This role grants read-only access to exactly 12 metadata entities required by the agent (see [PRD Section 5.4](../docs/prd.md)).
 
 ### Privileges Included
@@ -26,7 +26,7 @@ This role grants read-only access to exactly 12 metadata entities required by th
 
 1. Go to [make.powerapps.com](https://make.powerapps.com) and select your target environment.
 2. Navigate to **Solutions** in the left sidebar.
-3. Click **Import solution** → **Browse** → select `DataverseDocAgent_SecurityRole.zip`.
+3. Click **Import solution** → **Browse** → select `DataverseDocAgentSecurityRole_1_0_0_6_managed.zip`.
 4. Click **Next** → **Import**. Wait for the import to complete.
 5. Verify: navigate to **Settings** → **Security Roles** and confirm **DataverseDocAgent Reader** exists.
 
@@ -36,4 +36,4 @@ Re-importing the solution is safe (idempotent) — Dataverse matches by the solu
 
 Assign the **DataverseDocAgent Reader** role to your application user, then run `POST /api/security/check` to verify all 12 privileges are detected.
 
-For full setup instructions, see [`docs/setup-guide.md`](../docs/setup-guide.md) (created in Story 2.4). Until then, refer to [PRD Section 5.3](../docs/prd.md).
+For full setup instructions, see [`docs/setup-guide.md`](../docs/setup-guide.md).

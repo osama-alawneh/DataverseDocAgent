@@ -1,5 +1,12 @@
 # Deferred Work
 
+## Deferred from: code review of story-2.4-setup-guide-privacy (2026-04-17)
+
+- `credentials.TenantId` validated via GUID regex on `SecurityCheckRequest` but silently ignored by `DataverseConnectionFactory.ConnectAsync` — `ServiceClient(Uri, clientId, clientSecret, useUniqueInstance)` overload infers tenant from the environment URL. Pre-existing since story 1.2; field is required in API surface but has no effect on authentication. Either remove from required body or wire through.
+- `ExceptionHandlingMiddleware` request-body logging behaviour on unhandled error is unverified. Privacy policy states credentials are "never written to log files, application traces, diagnostic output, or telemetry" — needs audit to confirm middleware does not snapshot request body on exception paths.
+- `POST /api/security/check` error responses may echo parts of the credential via SDK exception messages (factory already strips inner exceptions, but controller-level error mapping is unreviewed for secret-adjacent content).
+- GDPR categorical "not a Data Processor" claim in `docs/privacy-policy.md:90-92` — grounded in PRD NFR-012 but legally risky; security-role and workflow payloads can embed user display names / email addresses. Hold pending legal review before public launch.
+
 ## Deferred from: code review of story-2.3-security-role-artefact (2026-04-16)
 
 - No CI/automated validation for zip integrity — no CI infrastructure exists yet; hand-rolled solution XML has no automated check that it remains importable after edits.
