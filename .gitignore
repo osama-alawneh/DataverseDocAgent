@@ -14,12 +14,10 @@
 .cursor/
 
 # BMAD / agent workflow files
-_bmad/
 *.bmad
 *.agent
 *.workflow
 
-_bmad-output/
 
 # AI state / memory files (ephemeral)
 project-state.md

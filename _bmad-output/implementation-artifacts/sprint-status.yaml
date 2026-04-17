@@ -1,0 +1,68 @@
+# generated: 2026-04-13
+# last_updated: 2026-04-16 (2.3 done)
+# project: DataverseDocAgent
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-04-13
+last_updated: 2026-04-16 (2.3 done)
+project: DataverseDocAgent
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+  # Epic 1: Foundation & POC
+  epic-1: in-progress
+  1-1-project-scaffold-and-solution-structure: done
+  1-2-dataverse-connection-and-credential-in-memory-handling: done
+  1-3-claude-agent-tool-use-loop-listcustomtables-poc: done
+  1-4-poc-baseline-measurement-and-code-review-gate: done
+  epic-1-retrospective: optional
+
+  # Epic 2: Security & Trust Layer
+  epic-2: in-progress
+  2-1-aspnet-core-web-api-project-setup: done
+  2-2-permission-pre-flight-checker-core-implementation: done
+  2-3-importable-security-role-solution-artefact: done
+  2-4-service-account-setup-guide-and-privacy-documentation: ready-for-dev
+  epic-2-retrospective: optional
+
+  # Epic 3: Mode 1 Core — Tables, Fields, Relationships, and .docx
+  epic-3: in-progress
+  3-1-async-job-infrastructure-job-store-background-service: ready-for-dev
+  3-2-idocumentstore-in-memory-implementation-phase-1: ready-for-dev
+  3-3-get-api-download-token-endpoint: ready-for-dev
+  3-4-dataverse-tools-tables-fields-relationships: ready-for-dev
+  3-5-mode-1-post-api-document-generate-endpoint-and-full-request-to-download-flow: ready-for-dev
+  epic-3-retrospective: optional
