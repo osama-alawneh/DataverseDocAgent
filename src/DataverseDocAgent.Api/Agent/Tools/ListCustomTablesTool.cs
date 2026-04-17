@@ -41,8 +41,12 @@ public sealed class ListCustomTablesTool : IDataverseTool
     /// <summary>
     /// Queries Dataverse for all custom entities and returns the result as JSON.
     /// </summary>
-    public Task<string> ExecuteAsync(JsonElement input)
+    public Task<string> ExecuteAsync(JsonElement input, CancellationToken cancellationToken = default)
     {
+        // F4 (story 1.3 deferred) — SDK does not expose async/cancellable Execute overload in
+        // v1.2.10. Token accepted for pipeline symmetry; not observed at SDK boundary until
+        // IOrganizationServiceAsync2 adoption lands.
+        cancellationToken.ThrowIfCancellationRequested();
         var entities = FetchCustomEntities();
         var json     = BuildResultJson(entities);
         return Task.FromResult(json);

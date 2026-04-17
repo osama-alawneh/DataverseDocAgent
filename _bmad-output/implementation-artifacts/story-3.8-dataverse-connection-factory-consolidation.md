@@ -1,6 +1,6 @@
 # Story 3.8: Dataverse Connection Factory Consolidation + Tool CancellationToken Propagation
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -43,61 +43,61 @@ so that the duplicate copies flagged in Epic 2 retro item T3 stop drifting and t
 
 ## Tasks / Subtasks
 
-- [ ] Scaffold shared project (AC: 1, 3)
-  - [ ] Create `src/DataverseDocAgent.Shared/DataverseDocAgent.Shared.csproj`
+- [x] Scaffold shared project (AC: 1, 3)
+  - [x] Create `src/DataverseDocAgent.Shared/DataverseDocAgent.Shared.csproj`
     - `<TargetFramework>net8.0</TargetFramework>` (match Api/Console)
     - `<Nullable>enable</Nullable>`, `<ImplicitUsings>enable</ImplicitUsings>`
     - `<PackageReference Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.2.10" />` (version must match current Api reference — pin exactly)
-  - [ ] Add project to `DataverseDocAgent.sln` in a `src` solution folder
-  - [ ] Add `<ProjectReference>` in `DataverseDocAgent.Api.csproj`
-  - [ ] Add `<ProjectReference>` in `DataverseDocAgent.Console.csproj`
-  - [ ] Verify `DataverseDocAgent.Tests.csproj` can resolve shared types (add `<ProjectReference>` if needed)
-- [ ] Move types into shared project (AC: 2)
-  - [ ] Copy `src/DataverseDocAgent.Api/Common/EnvironmentCredentials.cs` → `src/DataverseDocAgent.Shared/Dataverse/EnvironmentCredentials.cs`
+  - [x] Add project to `DataverseDocAgent.sln` in a `src` solution folder
+  - [x] Add `<ProjectReference>` in `DataverseDocAgent.Api.csproj`
+  - [x] Add `<ProjectReference>` in `DataverseDocAgent.Console.csproj`
+  - [x] Verify `DataverseDocAgent.Tests.csproj` can resolve shared types (add `<ProjectReference>` if needed)
+- [x] Move types into shared project (AC: 2)
+  - [x] Copy `src/DataverseDocAgent.Api/Common/EnvironmentCredentials.cs` → `src/DataverseDocAgent.Shared/Dataverse/EnvironmentCredentials.cs`
     - Update namespace to `DataverseDocAgent.Shared.Dataverse`
     - Preserve `[DebuggerBrowsable(DebuggerBrowsableState.Never)]` on `ClientSecret`
     - Preserve NFR-007 comments
-  - [ ] Copy `src/DataverseDocAgent.Api/Common/DataverseConnectionException.cs` → `src/DataverseDocAgent.Shared/Dataverse/DataverseConnectionException.cs`
+  - [x] Copy `src/DataverseDocAgent.Api/Common/DataverseConnectionException.cs` → `src/DataverseDocAgent.Shared/Dataverse/DataverseConnectionException.cs`
     - Update namespace
-  - [ ] Copy `src/DataverseDocAgent.Api/Dataverse/IDataverseConnectionFactory.cs` → `src/DataverseDocAgent.Shared/Dataverse/IDataverseConnectionFactory.cs`
+  - [x] Copy `src/DataverseDocAgent.Api/Dataverse/IDataverseConnectionFactory.cs` → `src/DataverseDocAgent.Shared/Dataverse/IDataverseConnectionFactory.cs`
     - Update namespace
     - Signature: `Task<IOrganizationServiceAsync2> ConnectAsync(EnvironmentCredentials credentials, CancellationToken cancellationToken = default)`
-  - [ ] Copy `src/DataverseDocAgent.Api/Dataverse/DataverseConnectionFactory.cs` → `src/DataverseDocAgent.Shared/Dataverse/DataverseConnectionFactory.cs`
+  - [x] Copy `src/DataverseDocAgent.Api/Dataverse/DataverseConnectionFactory.cs` → `src/DataverseDocAgent.Shared/Dataverse/DataverseConnectionFactory.cs`
     - Update namespace
     - Preserve all NFR annotations and credential-stripping `catch` blocks verbatim
-- [ ] Delete Api-side duplicates (AC: 5)
-  - [ ] Delete `src/DataverseDocAgent.Api/Common/EnvironmentCredentials.cs`
-  - [ ] Delete `src/DataverseDocAgent.Api/Common/DataverseConnectionException.cs`
-  - [ ] Delete `src/DataverseDocAgent.Api/Dataverse/IDataverseConnectionFactory.cs`
-  - [ ] Delete `src/DataverseDocAgent.Api/Dataverse/DataverseConnectionFactory.cs`
-  - [ ] Update all `using DataverseDocAgent.Api.Common;` / `using DataverseDocAgent.Api.Dataverse;` references to `using DataverseDocAgent.Shared.Dataverse;`
+- [x] Delete Api-side duplicates (AC: 5)
+  - [x] Delete `src/DataverseDocAgent.Api/Common/EnvironmentCredentials.cs`
+  - [x] Delete `src/DataverseDocAgent.Api/Common/DataverseConnectionException.cs`
+  - [x] Delete `src/DataverseDocAgent.Api/Dataverse/IDataverseConnectionFactory.cs`
+  - [x] Delete `src/DataverseDocAgent.Api/Dataverse/DataverseConnectionFactory.cs`
+  - [x] Update all `using DataverseDocAgent.Api.Common;` / `using DataverseDocAgent.Api.Dataverse;` references to `using DataverseDocAgent.Shared.Dataverse;`
     - Known touch points: `SecurityCheckService`, `Program.cs` (DI), `AgentOrchestrator`, `ListCustomTablesTool`, `ExceptionHandlingMiddleware` (if it references `EnvironmentCredentials`), `CredentialDestructuringPolicy`, `SecurityCheckController`
-- [ ] Delete Console-side duplicates (AC: 4)
-  - [ ] Delete `src/DataverseDocAgent.Console/Dataverse/DataverseConnectionFactory.cs`
-  - [ ] Delete any Console-only `EnvironmentCredentials.cs` / `DataverseConnectionException.cs` (grep to confirm whether they exist)
-  - [ ] Update Console `Program.cs` to import `using DataverseDocAgent.Shared.Dataverse;` and resolve the shared factory
-  - [ ] Grep `src/` for `namespace DataverseDocAgent.ConsoleApp` — expect zero hits
-- [ ] Propagate CancellationToken through IDataverseTool (AC: 6, 7, 8)
-  - [ ] Edit `src/DataverseDocAgent.Api/Agent/Tools/IDataverseTool.cs`
+- [x] Delete Console-side duplicates (AC: 4)
+  - [x] Delete `src/DataverseDocAgent.Console/Dataverse/DataverseConnectionFactory.cs`
+  - [x] Delete any Console-only `EnvironmentCredentials.cs` / `DataverseConnectionException.cs` (grep to confirm whether they exist)
+  - [x] Update Console `Program.cs` to import `using DataverseDocAgent.Shared.Dataverse;` and resolve the shared factory
+  - [x] Grep `src/` for `namespace DataverseDocAgent.ConsoleApp` — expect zero hits
+- [x] Propagate CancellationToken through IDataverseTool (AC: 6, 7, 8)
+  - [x] Edit `src/DataverseDocAgent.Api/Agent/Tools/IDataverseTool.cs`
     - Change `Task<string> ExecuteAsync(JsonElement input);` → `Task<string> ExecuteAsync(JsonElement input, CancellationToken cancellationToken = default);`
-  - [ ] Edit `src/DataverseDocAgent.Api/Agent/Tools/ListCustomTablesTool.cs`
+  - [x] Edit `src/DataverseDocAgent.Api/Agent/Tools/ListCustomTablesTool.cs`
     - Update `ExecuteAsync` signature to accept `CancellationToken cancellationToken`
     - Add comment near the synchronous `IOrganizationService.Execute` call: `// F4 (story 1.3 deferred) — SDK does not expose async/cancellable Execute overload in v1.2.10. Token accepted for pipeline symmetry; not observed at SDK boundary.`
-  - [ ] Edit `src/DataverseDocAgent.Api/Agent/AgentOrchestrator.cs` (~line 106)
+  - [x] Edit `src/DataverseDocAgent.Api/Agent/AgentOrchestrator.cs` (~line 106)
     - Change `tool.ExecuteAsync(inputElement)` → `tool.ExecuteAsync(inputElement, cancellationToken)`
     - Confirm the method's existing `CancellationToken` parameter is plumbed through
-- [ ] Write new unit tests (AC: 10, 11)
-  - [ ] `tests/DataverseDocAgent.Tests/ListCustomTablesToolTests.cs`
+- [x] Write new unit tests (AC: 10, 11)
+  - [x] `tests/DataverseDocAgent.Tests/ListCustomTablesToolTests.cs`
     - Test: `ExecuteAsync_WithCancellationToken_DoesNotThrowWhenTokenPassed`
     - Pass a `new CancellationTokenSource().Token` — assert the method accepts it without compile-time or runtime rejection
-  - [ ] `tests/DataverseDocAgent.Tests/CredentialDestructuringPolicyTests.cs` (create or extend existing)
+  - [x] `tests/DataverseDocAgent.Tests/CredentialDestructuringPolicyTests.cs` (create or extend existing)
     - Test: `Destructure_SharedEnvironmentCredentials_RedactsClientSecret`
     - Build an `EnvironmentCredentials` from `DataverseDocAgent.Shared.Dataverse` namespace, invoke the policy, assert `ClientSecret` is redacted
-- [ ] Verify build and tests (AC: 9, 12, 13, 14)
-  - [ ] `dotnet build DataverseDocAgent.sln --no-incremental` — zero warnings, zero errors
-  - [ ] `dotnet test` — all tests green (69+ after the two new tests)
-  - [ ] `grep -r "class DataverseConnectionFactory" src/` — exactly one file
-  - [ ] `grep -r "DataverseDocAgent.Api.Common.EnvironmentCredentials" src/` — zero hits
+- [x] Verify build and tests (AC: 9, 12, 13, 14)
+  - [x] `dotnet build DataverseDocAgent.sln --no-incremental` — zero warnings, zero errors
+  - [x] `dotnet test` — all tests green (69+ after the two new tests)
+  - [x] `grep -r "class DataverseConnectionFactory" src/` — exactly one file
+  - [x] `grep -r "DataverseDocAgent.Api.Common.EnvironmentCredentials" src/` — zero hits
 
 ## Dev Notes
 
@@ -161,11 +161,23 @@ Files edited:
 - Adding Central Package Management (`Directory.Packages.props`). Deferred item from story 1.1; not required for a three-project solution but revisit if a fourth project version-drifts.
 - Moving `AgentOrchestrator`, tools, `StructuredErrorResponse`, Serilog config, or middleware into shared. Out of scope for T3.
 
+## Completion Notes
+
+- Shared project created at `src/DataverseDocAgent.Shared/` targeting `net8.0`, single package reference `Microsoft.PowerPlatform.Dataverse.Client 1.2.10` (version matched to `Api.csproj` to avoid NuGet version drift — no CPM).
+- `InternalsVisibleTo("DataverseDocAgent.Tests")` carried across into `DataverseDocAgent.Shared.csproj` so the test project can exercise any future internal types without an extra `AssemblyAttribute` edit.
+- Moved types retain NFR-007 header comments; the `F-034 — …` prefix was kept verbatim so traceability to the feature registry is unchanged.
+- Canonical Api-side factory implementation preserved verbatim (return type `Task<ServiceClient>` — not `Task<IOrganizationServiceAsync2>` as the tasks-subsection speculated; the AC line `"preserved verbatim"` takes precedence, and `ServiceClient` implements `IOrganizationServiceAsync2` already, so no caller adaptation was needed).
+- `IDataverseTool.ExecuteAsync` now accepts `CancellationToken cancellationToken = default`; `ListCustomTablesTool` observes cancellation only at the pre-SDK boundary via `ThrowIfCancellationRequested()` — the synchronous `IOrganizationService.Execute` call is still un-cancellable per story 1.3 deferred item F4 (commented inline).
+- `AgentOrchestrator` line 106 now passes its existing `ct` through to `tool.ExecuteAsync(inputElement, ct)` instead of relying on the default token.
+- Test count delta: 86 → 92 (+6 net). Story spec's expected "68 currently-passing tests" was stale (Stories 3.0 + 3.1 added coverage between scaffold and this story); real baseline was 86. The new tests are the 2 AC-10 cancellation tests on `ListCustomTablesTool` plus 4 AC-11 tests in `CredentialDestructuringPolicyTests`. Three Moq setups in `AgentOrchestratorTests` were widened to `It.IsAny<CancellationToken>()` to match the new `ExecuteAsync` signature — behaviour unchanged.
+- Console project `Program.cs` continues to construct the factory directly (`new DataverseConnectionFactory()`); DI migration remains out of scope per the story's Out-of-Scope section.
+- `deferred-work.md` entries closed: "Duplicate class divergence risk" (story 1.2), "No CancellationToken support in ConnectAsync" (story 1.2), "Console project `DataverseConnectionFactory` does not implement `IDataverseConnectionFactory` and lacks `CancellationToken`" (story 2.2), "CancellationToken not propagated to IDataverseTool.ExecuteAsync" (story 1.3 D1). Deferred item "`ListCustomTablesTool.ExecuteAsync` wraps synchronous `IOrganizationService.Execute`" (story 1.3 F4) remains open — surface acknowledged; SDK boundary adoption pending.
+
 ## Definition of Done
 
-- [ ] All ACs met.
-- [ ] Build clean (zero warnings, zero errors).
-- [ ] All tests green (existing 68 + new 2 = 70 minimum).
-- [ ] Grep checks pass: one `DataverseConnectionFactory` file; zero `DataverseDocAgent.ConsoleApp` namespace hits; zero `DataverseDocAgent.Api.Common.EnvironmentCredentials` references.
-- [ ] Story 3.4 can be started without further consolidation work.
-- [ ] `deferred-work.md` updated to close T3 and PREP-4 entries.
+- [x] All ACs met.
+- [x] Build clean (zero warnings, zero errors).
+- [x] All tests green (existing 68 + new 2 = 70 minimum).
+- [x] Grep checks pass: one `DataverseConnectionFactory` file; zero `DataverseDocAgent.ConsoleApp` namespace hits; zero `DataverseDocAgent.Api.Common.EnvironmentCredentials` references.
+- [x] Story 3.4 can be started without further consolidation work.
+- [x] `deferred-work.md` updated to close T3 and PREP-4 entries.

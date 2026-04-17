@@ -5,8 +5,8 @@
 using System.Threading.Channels;
 using System.Threading.RateLimiting;
 using DataverseDocAgent.Api.Common;
-using DataverseDocAgent.Api.Dataverse;
 using DataverseDocAgent.Api.Features.SecurityCheck;
+using DataverseDocAgent.Shared.Dataverse;
 using DataverseDocAgent.Api.Jobs;
 using DataverseDocAgent.Api.Middleware;
 using Microsoft.AspNetCore.Mvc;

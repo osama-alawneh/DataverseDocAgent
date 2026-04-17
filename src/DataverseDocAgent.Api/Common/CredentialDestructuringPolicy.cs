@@ -1,5 +1,6 @@
 // NFR-007 — Prevents credential logging via Serilog destructuring
 using DataverseDocAgent.Api.Features.SecurityCheck;
+using DataverseDocAgent.Shared.Dataverse;
 using Serilog.Core;
 using Serilog.Events;
 

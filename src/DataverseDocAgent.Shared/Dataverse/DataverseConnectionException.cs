@@ -1,5 +1,5 @@
-// F-034 — Credential in-memory guarantee (NFR-007)
-namespace DataverseDocAgent.Api.Common;
+// F-034 / NFR-007 — Typed connection failure; message must never include credential values.
+namespace DataverseDocAgent.Shared.Dataverse;
 
 /// <summary>
 /// Thrown when a Dataverse connection attempt fails.

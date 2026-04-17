@@ -103,7 +103,7 @@ public sealed class AgentOrchestrator
                     {
                         try
                         {
-                            resultJson = await tool.ExecuteAsync(inputElement).ConfigureAwait(false);
+                            resultJson = await tool.ExecuteAsync(inputElement, ct).ConfigureAwait(false);
                         }
                         catch (Exception ex)
                         {

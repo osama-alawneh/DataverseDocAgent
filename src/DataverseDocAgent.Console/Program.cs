@@ -5,8 +5,7 @@ using System.Diagnostics;
 using Anthropic.SDK;
 using DataverseDocAgent.Api.Agent;
 using DataverseDocAgent.Api.Agent.Tools;
-using DataverseDocAgent.Api.Common;
-using DataverseDocAgent.Api.Dataverse;
+using DataverseDocAgent.Shared.Dataverse;
 using Microsoft.Extensions.Configuration;
 
 var config = new ConfigurationBuilder()

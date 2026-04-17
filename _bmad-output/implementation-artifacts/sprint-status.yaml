@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-13
-last_updated: 2026-04-17 (story 3-1 async-job-infrastructure reviewed → done)
+last_updated: 2026-04-17 (story 3-8 dataverse-connection-factory-consolidation → review)
 project: DataverseDocAgent
 project_key: NOKEY
 tracking_system: file-system
@@ -68,5 +68,5 @@ development_status:
   3-5-mode-1-post-api-document-generate-endpoint-and-full-request-to-download-flow: ready-for-dev
   3-6-publisher-prefix-intelligence: backlog
   3-7-application-user-inventory: backlog
-  3-8-dataverse-connection-factory-consolidation: ready-for-dev
+  3-8-dataverse-connection-factory-consolidation: review
   epic-3-retrospective: optional

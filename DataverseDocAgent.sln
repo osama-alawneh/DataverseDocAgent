@@ -13,6 +13,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{C4BDBC80
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataverseDocAgent.Tests", "tests\DataverseDocAgent.Tests\DataverseDocAgent.Tests.csproj", "{D400C414-C3EA-4619-9411-2A1B41C1399A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataverseDocAgent.Shared", "src\DataverseDocAgent.Shared\DataverseDocAgent.Shared.csproj", "{75BF91C7-214A-4FFD-85CA-E9D3B67B9A63}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -34,10 +36,15 @@ Global
 		{D400C414-C3EA-4619-9411-2A1B41C1399A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D400C414-C3EA-4619-9411-2A1B41C1399A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D400C414-C3EA-4619-9411-2A1B41C1399A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{75BF91C7-214A-4FFD-85CA-E9D3B67B9A63}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{75BF91C7-214A-4FFD-85CA-E9D3B67B9A63}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{75BF91C7-214A-4FFD-85CA-E9D3B67B9A63}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{75BF91C7-214A-4FFD-85CA-E9D3B67B9A63}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{1701EF8C-5C2E-4A73-84D7-8BC9117D33C2} = {E3015807-BA18-4758-B926-B76C8BD475A9}
 		{E153E67F-9F79-4F76-ADA3-0CC88AA151F1} = {E3015807-BA18-4758-B926-B76C8BD475A9}
 		{D400C414-C3EA-4619-9411-2A1B41C1399A} = {C4BDBC80-1CBA-4FFB-9AD7-AE9F2DA9F1D5}
+		{75BF91C7-214A-4FFD-85CA-E9D3B67B9A63} = {E3015807-BA18-4758-B926-B76C8BD475A9}
 	EndGlobalSection
 EndGlobal

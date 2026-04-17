@@ -1,8 +1,7 @@
 // Story 2.2 — Permission Pre-Flight Checker unit tests
 // F-029, F-030, F-031
-using DataverseDocAgent.Api.Common;
-using DataverseDocAgent.Api.Dataverse;
 using DataverseDocAgent.Api.Features.SecurityCheck;
+using DataverseDocAgent.Shared.Dataverse;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 

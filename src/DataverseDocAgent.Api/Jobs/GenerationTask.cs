@@ -1,5 +1,5 @@
 // F-036, FR-036, NFR-007 — Async job task envelope (Story 3.1)
-using DataverseDocAgent.Api.Common;
+using DataverseDocAgent.Shared.Dataverse;
 
 namespace DataverseDocAgent.Api.Jobs;
 

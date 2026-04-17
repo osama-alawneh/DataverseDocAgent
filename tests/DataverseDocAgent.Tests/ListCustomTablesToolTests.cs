@@ -123,6 +123,41 @@ public class ListCustomTablesToolTests
             "solutionName must not appear in output until the solution query is implemented");
     }
 
+    // ── AC-10 (story 3.8): CancellationToken propagation ──────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_WithCancellationToken_DoesNotThrowWhenTokenPassed()
+    {
+        var svcMock = new Mock<IOrganizationService>();
+        svcMock
+            .Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+            .Returns(BuildMetadataResponse());
+
+        var tool = new ListCustomTablesTool(svcMock.Object);
+
+        using var cts = new CancellationTokenSource();
+
+        // A non-default, non-cancelled token must be accepted without throwing. SDK-level
+        // cancellation is still a gap (story 1.3 F4), but the pipeline signature is now
+        // CancellationToken-aware per story 3.8 PREP-4.
+        var result = await tool.ExecuteAsync(EmptyInput(), cts.Token);
+
+        Assert.False(string.IsNullOrWhiteSpace(result));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithAlreadyCancelledToken_ThrowsOperationCanceled()
+    {
+        var svcMock = new Mock<IOrganizationService>();
+        var tool = new ListCustomTablesTool(svcMock.Object);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => tool.ExecuteAsync(EmptyInput(), cts.Token));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static JsonElement EmptyInput()

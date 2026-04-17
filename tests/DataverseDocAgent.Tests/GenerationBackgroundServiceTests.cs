@@ -1,7 +1,7 @@
 // F-036, NFR-007 — Story 3.1 background service unit tests
 using System.Threading.Channels;
-using DataverseDocAgent.Api.Common;
 using DataverseDocAgent.Api.Jobs;
+using DataverseDocAgent.Shared.Dataverse;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DataverseDocAgent.Tests;

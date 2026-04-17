@@ -1,8 +1,7 @@
-// F-034 — Abstraction for testable credential handling
-using DataverseDocAgent.Api.Common;
+// F-034 / NFR-007 — Abstraction for testable credential handling.
 using Microsoft.PowerPlatform.Dataverse.Client;
 
-namespace DataverseDocAgent.Api.Dataverse;
+namespace DataverseDocAgent.Shared.Dataverse;
 
 public interface IDataverseConnectionFactory
 {
