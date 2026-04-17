@@ -3,7 +3,7 @@
 ## DataverseDocAgent_SecurityRole.zip
 
 Dataverse **unmanaged** solution containing the **DataverseDocAgent Reader** security role.
-This role grants read-only access to exactly 13 metadata entities required by the agent (see [PRD Section 5.4](../docs/prd.md)).
+This role grants read-only access to exactly 12 metadata entities required by the agent (see [PRD Section 5.4](../docs/prd.md)).
 
 ### Privileges Included
 
@@ -18,9 +18,8 @@ This role grants read-only access to exactly 13 metadata entities required by th
 | WebResource | Read | Organisation |
 | Workflow | Read | Organisation |
 | Role | Read | Organisation |
-| RolePrivilege | Read | Organisation |
 | SystemForm | Read | Organisation |
-| SavedQuery | Read | Organisation |
+| SavedQuery (View) — privilege `prvReadQuery` | Read | Organisation |
 | Organization | Read | Organisation |
 
 ### Import Instructions
@@ -35,6 +34,6 @@ Re-importing the solution is safe (idempotent) — Dataverse matches by the solu
 
 ### After Import
 
-Assign the **DataverseDocAgent Reader** role to your application user, then run `POST /api/security/check` to verify all 13 privileges are detected.
+Assign the **DataverseDocAgent Reader** role to your application user, then run `POST /api/security/check` to verify all 12 privileges are detected.
 
 For full setup instructions, see [`docs/setup-guide.md`](../docs/setup-guide.md) (created in Story 2.4). Until then, refer to [PRD Section 5.3](../docs/prd.md).
