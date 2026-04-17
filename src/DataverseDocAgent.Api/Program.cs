@@ -56,8 +56,12 @@ builder.Services.AddScoped<IDataverseConnectionFactory, DataverseConnectionFacto
 builder.Services.AddScoped<SecurityCheckService>();
 
 // NFR-018, NFR-014, NFR-007 — Rate limiting on credential-accepting endpoints (Story 3.0)
-builder.Services.Configure<CredentialEndpointsRateLimitOptions>(
-    builder.Configuration.GetSection(CredentialEndpointsRateLimitOptions.SectionName));
+// Fail-fast config binding: ValidateOnStart surfaces out-of-range PermitLimit/WindowSeconds
+// at startup rather than on the first rejection (else FixedWindowRateLimiter throws at 500).
+builder.Services.AddOptions<CredentialEndpointsRateLimitOptions>()
+    .Bind(builder.Configuration.GetSection(CredentialEndpointsRateLimitOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -82,8 +86,19 @@ builder.Services.AddRateLimiter(options =>
 
     options.OnRejected = async (context, ct) =>
     {
-        var retryAfter = context.Lease.TryGetMetadata(
-            MetadataName.RetryAfter, out TimeSpan wait) ? (int)wait.TotalSeconds : 60;
+        // Lease ownership transfers here per RateLimiter contract — dispose so metadata buffers
+        // are released even if the current limiter swaps to one with non-trivial lease state.
+        using var lease = context.Lease;
+
+        // Fallback to operator-configured window (not a magic 60) so short/long window tunings
+        // produce coherent client retry behaviour when the lease yields no metadata.
+        var opts = context.HttpContext.RequestServices
+            .GetRequiredService<IOptions<CredentialEndpointsRateLimitOptions>>().Value;
+        var rawSeconds = lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan wait)
+            ? (int)wait.TotalSeconds
+            : opts.WindowSeconds;
+        var retryAfter = Math.Max(1, rawSeconds);
+
         await RateLimitRejection.WriteAsync(context.HttpContext, retryAfter, ct);
     };
 });

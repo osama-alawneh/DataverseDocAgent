@@ -1,6 +1,6 @@
 # Story 3.0: Rate Limiting on Credential-Accepting Endpoints
 
-Status: review
+Status: done
 
 ## Story
 
@@ -197,7 +197,42 @@ None — build clean (0 warn / 0 err) and 73/73 tests green on first full build/
 - **Reverse-proxy edge case noted.** When deployed behind a load balancer, `RemoteIpAddress` is the proxy IP. Out of scope for P2 per Dev Notes. Appended to deferred-work.md as a P3 deployment-story follow-up (add `ForwardedHeaders` middleware).
 - **Serilog credential clamp (Story 2.4 / commit `7875516`) is load-bearing.** The rejection path writes no log statement, but if a future change adds one, the `Microsoft.AspNetCore`-Warning and `Microsoft.PowerPlatform.Dataverse.Client`-Warning clamps already prevent accidental request-body dumps at Info/Debug. NFR-007 posture is preserved.
 - **Build:** `dotnet build DataverseDocAgent.sln --no-incremental` → 0 warn / 0 err.
-- **Tests:** `dotnet test` → Passed: 73, Failed: 0, Skipped: 0 (68 baseline + 5 new `RateLimiterTests`).
+- **Tests:** `dotnet test` → Passed: 75, Failed: 0, Skipped: 0 (68 baseline + 7 `RateLimiterTests` — 5 original + 2 added during review: null-IP partition and HasStarted guard).
+
+### Review Findings
+
+Code review 2026-04-17 (`bmad-code-review` via three parallel reviewers: Blind Hunter, Edge Case Hunter, Acceptance Auditor) against commit `58568c5`. All High/Med issues patched; Low-severity items dismissed as noise or deferred to `deferred-work.md`. Re-test: 75/75 green.
+
+**Patches applied:**
+- [x] [Review][Patch] Options bind had no validation — added `.ValidateDataAnnotations().ValidateOnStart()` so out-of-range `PermitLimit`/`WindowSeconds` fail at startup rather than on first rejection [`src/DataverseDocAgent.Api/Program.cs`]
+- [x] [Review][Patch] `Retry-After` fallback hard-coded to 60 — now falls back to operator-configured `WindowSeconds` when lease metadata is absent; clamped to `Math.Max(1, …)` to prevent zero/negative header values [`src/DataverseDocAgent.Api/Program.cs`]
+- [x] [Review][Patch] `OnRejected` never disposed lease — now `using var lease = context.Lease;` so non-trivial lease state is released (future-proofing for Phase 3 limiter swap) [`src/DataverseDocAgent.Api/Program.cs`]
+- [x] [Review][Patch] `WriteAsync` had no `Response.HasStarted` guard — added early-return mirroring `ExceptionHandlingMiddleware`, preventing a split response if a rare middleware race commits bytes before rejection [`src/DataverseDocAgent.Api/Common/RateLimitRejection.cs`]
+- [x] [Review][Patch] Partition isolation test was overstated (only one `ctxB` acquire) — now exhausts `ctxB`'s full budget to prove independent allocation [`tests/DataverseDocAgent.Tests/RateLimiterTests.cs`]
+- [x] [Review][Patch] Added `PartitionedLimiter_NullRemoteIpAddress_CollapsesToUnknownBucket` — locks in the documented null-IP semantics and surfaces the proxy/LB trap as a test-visible fact [`tests/DataverseDocAgent.Tests/RateLimiterTests.cs`]
+- [x] [Review][Patch] Added `RateLimitRejection_WriteAsync_ResponseAlreadyStarted_IsNoOp` — verifies the HasStarted guard; uses an `IHttpResponseFeature` fake [`tests/DataverseDocAgent.Tests/RateLimiterTests.cs`]
+- [x] [Review][Patch] AC-4 forward-pointer recorded — story-3.5 Tasks list now carries the `[EnableRateLimiting(...)]` subtask; `deferred-work.md` has a 3.0 section covering AC-11, reverse-proxy partition collapse, window replenishment, and health-exemption assertion [`_bmad-output/implementation-artifacts/story-3.5-mode1-generation.md`, `_bmad-output/implementation-artifacts/deferred-work.md`]
+
+**Deferred (logged in `deferred-work.md`):**
+- [x] [Review][Defer] Reverse-proxy / null-IP partition collapse — acknowledged; P3 deployment story adds `ForwardedHeaders` middleware
+- [x] [Review][Defer] Sprint-level gate on Story 3.5 → done (AC-11) — enforced by code review checklist, not code
+- [x] [Review][Defer] Window-replenishment / boundary-concurrency tests — out of story 3.0 AC-10 scope
+- [x] [Review][Defer] `/api/health` exemption is implicit — add `DisableRateLimiting`-style lock in Phase 3 when global policy is introduced
+
+**Dismissed (noise / false positive / handled elsewhere):**
+- [Review][Dismiss] "appsettings.Development.json edit not in diff" — file is gitignored (.gitignore:513); local-only override is intentional and documented
+- [Review][Dismiss] Weak `Body.Position == 0` assertion — sufficient for the no-read claim; a caller that seeks-and-reads would still be correct behaviourally
+- [Review][Dismiss] `OnRejected` mutates headers before first `await` (ct not honoured pre-await) — standard .NET async pattern; cancellation between headers and body is rare and harmless
+- [Review][Dismiss] `Headers["Retry-After"]` indexer vs typed property — functionally identical for this path; no upstream retry-hint middleware exists
+- [Review][Dismiss] Redundant `RejectionStatusCode = 429` + `Response.StatusCode = 429` — harmless belt-and-braces
+- [Review][Dismiss] No test asserting `[EnableRateLimiting]` attribute wiring — attribute is static source; a reflection test would fragilise against the policy-name constant rename
+- [Review][Dismiss] AC-9 log-sink capture not in test — rejection path emits zero log statements; inspection is vacuous by construction
+
+### Change Log
+
+| Date       | Change                                                                                              |
+|------------|-----------------------------------------------------------------------------------------------------|
+| 2026-04-17 | Story 3.0 implemented (`58568c5`); review findings applied in follow-up; status → done.             |
 
 ### File List
 

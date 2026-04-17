@@ -1,5 +1,12 @@
 # Deferred Work
 
+## Deferred from: code review of story-3.0-rate-limiting (2026-04-17)
+
+- **Reverse-proxy / null-`RemoteIpAddress` partition collapse.** Behind an LB/proxy, every request carries the proxy IP as `RemoteIpAddress`; null-IP request hosts collapse to the literal `"unknown"` bucket. A single noisy tenant denies service to the whole upstream cohort. P3 deployment story must add `Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders` middleware (before `UseRateLimiter`) and/or move partitioning to issued API keys per ADR-009. Null-IP behaviour is now covered by `PartitionedLimiter_NullRemoteIpAddress_CollapsesToUnknownBucket` to lock the current semantics.
+- **Sprint-level dependency gate on Story 3.5 → done (AC-11).** No code enforces this. Story 3.5 code-review checklist must refuse `done` if Story 3.0 is not `done`.
+- **Window-replenishment / boundary-concurrency test.** `AutoReplenishment = true` on the fixed-window limiter has no direct unit coverage — a regression to `AutoReplenishment = false` would still pass all current tests. Intentionally out of scope for story 3.0 (not in AC-10); revisit if rate-limit regressions surface or when Phase 3 swaps partitioning to API keys.
+- **`/api/health` exemption is implicit, not asserted by test.** Endpoint has no `[EnableRateLimiting]` and no `GlobalLimiter` is configured, so it is exempt today. One future global-limiter flip silently throttles health checks. Add a `DisableRateLimiting`-style lock or an assertion test when Phase 3 introduces a global policy.
+
 ## Resolved: T1 middleware body-logging audit (2026-04-17)
 
 Retro item T1 (`ExceptionHandlingMiddleware` body-logging audit) audited in this session via `bmad-code-review`. Findings:

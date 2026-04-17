@@ -97,8 +97,58 @@ public class RateLimiterTests
         using (var a2 = partitioned.AttemptAcquire(ctxA, 1)) Assert.True(a2.IsAcquired);
         using (var a3 = partitioned.AttemptAcquire(ctxA, 1)) Assert.False(a3.IsAcquired);
 
-        using var b1 = partitioned.AttemptAcquire(ctxB, 1);
-        Assert.True(b1.IsAcquired);
+        // ctxB must get its own full budget — exhausting ctxA's partition must not bleed over.
+        using (var b1 = partitioned.AttemptAcquire(ctxB, 1)) Assert.True(b1.IsAcquired);
+        using (var b2 = partitioned.AttemptAcquire(ctxB, 1)) Assert.True(b2.IsAcquired);
+        using (var b3 = partitioned.AttemptAcquire(ctxB, 1)) Assert.False(b3.IsAcquired);
+    }
+
+    [Fact]
+    public void PartitionedLimiter_NullRemoteIpAddress_CollapsesToUnknownBucket()
+    {
+        using var partitioned = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => BuildOptions(permitLimit: 1)));
+
+        var anon1 = BuildContext(remoteIp: null);
+        var anon2 = BuildContext(remoteIp: null);
+
+        using (var first = partitioned.AttemptAcquire(anon1, 1)) Assert.True(first.IsAcquired);
+        using var second = partitioned.AttemptAcquire(anon2, 1);
+        Assert.False(second.IsAcquired);
+    }
+
+    [Fact]
+    public async Task RateLimitRejection_WriteAsync_ResponseAlreadyStarted_IsNoOp()
+    {
+        var ctx = BuildContext();
+        var startedBody = new StartedResponseBody();
+        ctx.Response.Body = startedBody;
+        ctx.Features.Set<Microsoft.AspNetCore.Http.Features.IHttpResponseFeature>(
+            new StartedResponseFeature());
+
+        await RateLimitRejection.WriteAsync(ctx, retryAfterSeconds: 60);
+
+        Assert.False(ctx.Response.Headers.ContainsKey("Retry-After"));
+        Assert.Equal(0, startedBody.Length);
+    }
+
+    private sealed class StartedResponseFeature : Microsoft.AspNetCore.Http.Features.IHttpResponseFeature
+    {
+        public int StatusCode { get; set; } = 200;
+        public string? ReasonPhrase { get; set; }
+        public IHeaderDictionary Headers { get; set; } = new HeaderDictionary();
+        public Stream Body { get; set; } = Stream.Null;
+        public bool HasStarted => true;
+        public void OnStarting(Func<object, Task> callback, object state) { }
+        public void OnCompleted(Func<object, Task> callback, object state) { }
+    }
+
+    private sealed class StartedResponseBody : MemoryStream
+    {
+        public override void Write(byte[] buffer, int offset, int count)
+            => throw new InvalidOperationException("response already started");
     }
 
     private static HttpContext BuildContext(string? jsonBody = null, IPAddress? remoteIp = null)

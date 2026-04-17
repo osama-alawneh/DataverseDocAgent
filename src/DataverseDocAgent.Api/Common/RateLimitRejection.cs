@@ -14,6 +14,14 @@ public static class RateLimitRejection
 
     public static async Task WriteAsync(HttpContext context, int retryAfterSeconds, CancellationToken ct = default)
     {
+        // Mirror ExceptionHandlingMiddleware's guard: if the response has already started,
+        // header/status mutation throws InvalidOperationException and the client sees a split
+        // response. Silently skip — the client's in-flight body is already committed.
+        if (context.Response.HasStarted)
+        {
+            return;
+        }
+
         context.Response.Headers["Retry-After"] = retryAfterSeconds.ToString();
         context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
         context.Response.ContentType = MediaTypeNames.Application.Json;
