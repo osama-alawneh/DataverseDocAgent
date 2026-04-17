@@ -408,6 +408,53 @@ So that I can complete setup without contacting support and understand exactly w
 
 **Exit gate (from PRD):** First customer receives and validates a generated document.
 
+**Epic 2 retrospective addendum (2026-04-17):** Story 3.0 (rate limiting on credential-accepting endpoints) is inserted as the first Epic 3 story — it MUST ship before any new credential-accepting endpoint goes live in this epic (specifically before story 3.5). Driver: Significant Discovery #3 in the Epic 2 retro — `/api/security/check` (story 2.2) and `/api/document/generate` (story 3.5) both accept raw credentials; rate limiting is now a cross-cutting concern, not an Epic 4 / P3+ deferral. This tightens the NFR-018 posture for P2 from "permissive registration" to "enforced throttling on credential endpoints". Additionally, story 3.4 AC text is strengthened to require live-Dataverse validation against a real environment before `done`, driven by the story 2.3 AC6 near-miss where four real bugs were invisible to XML + unit tests and only surfaced under live execution.
+
+---
+
+### Story 3.0: Rate Limiting on Credential-Accepting Endpoints
+
+As a platform operator,
+I want enforced per-client rate limits on every endpoint that accepts raw Dataverse credentials,
+So that a compromised or malicious caller cannot use the API as a high-throughput credential-probing oracle and so NFR-018 is upheld before the Epic 3 document-generation endpoint goes live.
+
+**Acceptance Criteria:**
+
+**Given** ASP.NET Core `Microsoft.AspNetCore.RateLimiting` middleware is registered in `Program.cs` via `AddRateLimiter` (per ADR-009)
+**When** the API starts up
+**Then** a named policy `credential-endpoints` is defined with a fixed- or sliding-window limiter appropriate to Phase 2 traffic (suggested: 10 requests / minute / partition key)
+**And** the limiter partition key is the client IP address (via `HttpContext.Connection.RemoteIpAddress`) — switchable to API-key partitioning in Phase 3 without structural change
+**And** the middleware is registered in the pipeline ahead of controllers
+
+**Given** the `credential-endpoints` policy is attached to `POST /api/security/check`
+**When** a single client exceeds the configured request rate within the window
+**Then** HTTP 429 Too Many Requests is returned with the structured error format `{ error: "Rate limit exceeded. Retry after N seconds.", code: "RATE_LIMIT_EXCEEDED", safeToRetry: true }` (NFR-014)
+**And** the `Retry-After` HTTP header is populated with the window reset in seconds
+**And** no credential from the rejected request is logged or persisted anywhere
+
+**Given** the `credential-endpoints` policy is attached to `POST /api/document/generate` at the point that endpoint is introduced (story 3.5)
+**When** a client exceeds the limit
+**Then** the same 429 + structured error + `Retry-After` behaviour applies, before any Dataverse connection attempt is made
+**And** no jobId is created for the rejected request
+
+**Given** the rate limit policy configuration
+**When** reviewed in `appsettings.json`
+**Then** the window size and permit count are externally configurable (no recompile required to adjust limits)
+**And** default values are documented in the API reference section of the setup guide
+
+**Given** a burst that stays within the limit
+**When** ten clients each make one request
+**Then** all ten succeed — the limit is per-partition (per-IP in P2), not global
+
+**Given** unit tests for the rate limiter
+**When** the test suite runs
+**Then** at least one test exercises the 429 path by exceeding the configured limit against a mocked endpoint
+**And** one test verifies the error response conforms to the NFR-014 structured error format
+
+**Story dependency gate:** Story 3.5 (POST /api/document/generate) MUST NOT transition to `done` until story 3.0 is `done` — this is an epic-level dependency, not a sequencing preference.
+
+> **F-030 — NFR-014, NFR-018, NFR-007, ADR-009**
+
 ---
 
 ### Story 3.1: Async Job Infrastructure (Job Store + Background Service)
@@ -528,6 +575,18 @@ So that Claude can call them during Mode 1 generation to gather all required env
 **Given** credentials are invalid at tool execution time
 **When** the tool is called
 **Then** a typed exception is thrown that the `AgentOrchestrator` catches and converts to a job failure — credentials are not logged
+
+**Live-Dataverse validation gate (added by Epic 2 retrospective, 2026-04-17):**
+**Given** all three tools (`list_custom_tables`, `get_table_fields`, `get_relationships`) have passed unit tests
+**When** the story is a candidate to transition from `review` → `done`
+**Then** each tool MUST be executed at least once against a real, named Dataverse environment (e.g. `orgd76c9cf3` or equivalent sandbox) using the `DataverseDocAgent Reader` security role
+**And** `list_custom_tables` MUST return a non-empty result where at least one known custom entity is present and correctly labelled
+**And** `get_table_fields` MUST return results for at least one custom table that include an OptionSet field with option values and display labels populated
+**And** `get_relationships` MUST return both a 1:N and, where available, an N:N relationship for a known-to-have-both custom table
+**And** the execution evidence (environment name, date, tool call summary, observed discrepancies) is recorded in the story's "Debug Log References" section before the story is marked `done`
+**And** any bug surfaced during live validation (privilege gaps, schema-name mismatches, SDK quirks) MUST be fixed in the same story or explicitly deferred with a named follow-up story ID
+
+**Driver:** Story 2.3 AC6 near-miss — XML inspection + unit tests declared "validated by design"; live execution surfaced four real bugs (missing `prvReadUser`, phantom `prvReadRolePrivilege`, `prvReadSavedQuery` → `prvReadQuery` rename, SharePoint DMI baseline privileges). Story 3.4 ships three Dataverse tools in one story and cannot repeat that failure mode.
 
 > **F-001, F-002, F-003 — FR-001, FR-002, FR-003, NFR-007, NFR-008**
 
