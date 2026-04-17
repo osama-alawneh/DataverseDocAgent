@@ -63,7 +63,10 @@ builder.Services.AddScoped<SecurityCheckService>();
 // background service (consumer) share the same instance for the lifetime of the process.
 // IGenerationPipeline is the stub in Phase 2; Story 3.5 swaps this registration.
 builder.Services.AddSingleton<IJobStore, InMemoryJobStore>();
-builder.Services.AddSingleton(Channel.CreateUnbounded<GenerationTask>());
+// Factory form so the channel is created by the DI container once the host is built,
+// not captured at module-load time. Prevents a stale, Complete()'d channel surviving
+// across WebApplicationFactory instances in tests.
+builder.Services.AddSingleton(_ => Channel.CreateUnbounded<GenerationTask>());
 builder.Services.AddSingleton<IGenerationPipeline, StubGenerationPipeline>();
 builder.Services.AddHostedService<GenerationBackgroundService>();
 

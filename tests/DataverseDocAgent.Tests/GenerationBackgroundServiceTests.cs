@@ -58,6 +58,9 @@ public class GenerationBackgroundServiceTests
         var failedId  = store.CreateJob();
         var succeedId = store.CreateJob();
 
+        // Keep the channel open until we observe task-1 reaching Failed, then write
+        // task-2 and complete. Proves ExecuteAsync survives a per-task fault across
+        // real inter-task boundaries, not just within a pre-closed channel.
         var pipeline = new FakePipeline(task =>
             task.JobId == failedId
                 ? throw new InvalidOperationException("boom")
@@ -70,19 +73,52 @@ public class GenerationBackgroundServiceTests
             pipeline,
             NullLogger<GenerationBackgroundService>.Instance);
 
-        await channel.Writer.WriteAsync(new GenerationTask(failedId,  BuildCreds()));
+        using var hostCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await service.StartAsync(hostCts.Token);
+
+        await channel.Writer.WriteAsync(new GenerationTask(failedId, BuildCreds()));
+
+        var pollDeadline = DateTime.UtcNow.AddSeconds(5);
+        while (store.GetJob(failedId)!.Status != JobStatus.Failed)
+        {
+            Assert.True(DateTime.UtcNow < pollDeadline,
+                "background service did not record task-1 failure within deadline");
+            await Task.Delay(25, hostCts.Token);
+        }
+
         await channel.Writer.WriteAsync(new GenerationTask(succeedId, BuildCreds()));
         channel.Writer.Complete();
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await service.StartAsync(cts.Token);
-        await service.ExecuteTask!;              // waits for ExecuteAsync to drain the channel
+        await service.ExecuteTask!;
         await service.StopAsync(CancellationToken.None);
 
         Assert.Equal(JobStatus.Failed, store.GetJob(failedId)!.Status);
         var succeeded = store.GetJob(succeedId)!;
         Assert.Equal(JobStatus.Ready, succeeded.Status);
         Assert.Equal("tok-after-fault", succeeded.DownloadToken);
+    }
+
+    [Fact]
+    public async Task ProcessTaskAsync_HostShutdownCancellation_PropagatesWithoutMarkingFailed()
+    {
+        // AC-3 + Dev Notes: OperationCanceledException on host shutdown must rethrow so
+        // the BackgroundService base class stops cleanly — it must NOT collapse into a
+        // generic Failed job record. Pins the `when stoppingToken.IsCancellationRequested`
+        // catch filter against accidental removal.
+        var store = new InMemoryJobStore();
+        var id = store.CreateJob();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var pipeline = new FakePipeline(_ => throw new OperationCanceledException(cts.Token));
+        var service = BuildService(store, pipeline);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            service.ProcessTaskAsync(new GenerationTask(id, BuildCreds()), cts.Token));
+
+        var record = store.GetJob(id)!;
+        Assert.NotEqual(JobStatus.Failed, record.Status);
+        Assert.Null(record.ErrorMessage);
     }
 
     private static GenerationBackgroundService BuildService(IJobStore store, IGenerationPipeline pipeline)

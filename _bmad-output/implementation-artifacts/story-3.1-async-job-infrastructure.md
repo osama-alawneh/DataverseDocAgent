@@ -1,6 +1,6 @@
 # Story 3.1: Async Job Infrastructure (Job Store + Background Service)
 
-Status: review
+Status: done
 
 ## Story
 
@@ -123,4 +123,16 @@ New:
 
 Modified:
 - `src/DataverseDocAgent.Api/Program.cs` — DI for `IJobStore`, `Channel<GenerationTask>`, `IGenerationPipeline`, `GenerationBackgroundService`.
-- `_bmad-output/implementation-artifacts/sprint-status.yaml` — story 3-1 → review.
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — story 3-1 → review → done.
+
+### Code Review Outcomes (2026-04-17)
+
+Three-layer adversarial review (Blind Hunter + Edge Case Hunter + Acceptance Auditor) run against commit `712c18f`. Auditor verdict: SATISFIED on all six ACs; `ex.Message` → sanitized-message substitution ruled an authorised (and arguably required) NFR-007 upgrade. Five patches applied in follow-up commit:
+
+- **P1** `InMemoryJobStore.UpdateStatus` now true no-op on unknown id (was `AddOrUpdate`-inserting a ghost record — contradicting the interface xmldoc). Test `UpdateStatus_UnknownId_IsTrueNoOp_NoGhostRecordInserted` flipped to pin the intended contract. Closes latent arbitrary-key planting footgun ahead of Story 3.5 wiring the real controller.
+- **P2** `JobStatusController.Get` now rejects non-guid route parameters with `JOB_NOT_FOUND` before touching the store. Caps log cardinality and aligns with `CreateJob()`'s guid-only output.
+- **P3** `Channel<GenerationTask>` registered via factory `AddSingleton(_ => Channel.CreateUnbounded<GenerationTask>())` instead of captured instance — safer under `WebApplicationFactory` reuse and host reload.
+- **P4** `ExecuteAsync_OneTaskFailure_DoesNotStopLoop_...` rewritten to keep the channel open across the first failure (previously completed pre-start — the test would have passed even if the loop aborted on fault).
+- **P5** New test `ProcessTaskAsync_HostShutdownCancellation_PropagatesWithoutMarkingFailed` pins the `catch (OperationCanceledException) when stoppingToken.IsCancellationRequested` filter.
+
+Deferred (tracked in `deferred-work.md`): unbounded-channel credential lifetime; host-shutdown drain strategy; `JobRecord` ErrorCode/SafeToRetry taxonomy (Story 3.5); polling rate-limit for `/api/jobs/*` (Phase 3); `JsonStringEnumConverter` vs `ToString().ToLower()`; `ChannelReader`/`Writer` DI split; `IGenerationPipeline` cancellation contract test.

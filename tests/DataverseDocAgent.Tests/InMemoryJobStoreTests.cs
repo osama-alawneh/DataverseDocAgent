@@ -54,16 +54,16 @@ public class InMemoryJobStoreTests
     }
 
     [Fact]
-    public void UpdateStatus_UnknownId_IsNoOpFromGetPerspective()
+    public void UpdateStatus_UnknownId_IsTrueNoOp_NoGhostRecordInserted()
     {
         var store = new InMemoryJobStore();
 
         store.UpdateStatus("ghost", JobStatus.Failed, null, "x");
-        var record = store.GetJob("ghost");
 
-        // AddOrUpdate inserts — so the store does record it. Assertion documents that
-        // behavior explicitly so a future behavioral change is caught.
-        Assert.NotNull(record);
-        Assert.Equal(JobStatus.Failed, record!.Status);
+        // Contract (IJobStore.UpdateStatus xmldoc): "No-op if the id is unknown."
+        // Pins the fix for Story 3.1 code review P1 — previously AddOrUpdate silently
+        // inserted, which would have let arbitrary callers plant records keyed on
+        // untrusted strings.
+        Assert.Null(store.GetJob("ghost"));
     }
 }

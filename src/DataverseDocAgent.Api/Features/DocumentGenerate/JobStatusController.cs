@@ -22,7 +22,11 @@ public sealed class JobStatusController : ControllerBase
     [HttpGet("/api/jobs/{jobId}")]
     public IActionResult Get(string jobId)
     {
-        var record = _jobStore.GetJob(jobId);
+        // CreateJob() only ever emits Guid.NewGuid().ToString(), so a non-guid on the
+        // wire is by definition a miss. Rejecting early also caps log cardinality —
+        // otherwise a caller could plant arbitrarily long strings in structured logs
+        // via the jobId route parameter.
+        var record = Guid.TryParse(jobId, out _) ? _jobStore.GetJob(jobId) : null;
         if (record is null)
         {
             return Ok(new StructuredErrorResponse

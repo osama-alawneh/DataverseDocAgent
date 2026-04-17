@@ -20,17 +20,26 @@ public sealed class InMemoryJobStore : IJobStore
         return jobId;
     }
 
+    // True no-op on unknown id: the background service and controller only ever
+    // call UpdateStatus after CreateJob seeded the record, so an unknown id
+    // means something is wrong upstream — not an invitation to plant a ghost
+    // record. A lost-update retry loop guards against concurrent replaces.
     public void UpdateStatus(string jobId, JobStatus status, string? downloadToken, string? errorMessage)
     {
-        _jobs.AddOrUpdate(
-            jobId,
-            addValueFactory: _ => new JobRecord(jobId, status, downloadToken, errorMessage),
-            updateValueFactory: (_, existing) => existing with
+        while (_jobs.TryGetValue(jobId, out var existing))
+        {
+            var updated = existing with
             {
                 Status = status,
                 DownloadToken = downloadToken,
                 ErrorMessage = errorMessage,
-            });
+            };
+
+            if (_jobs.TryUpdate(jobId, updated, existing))
+            {
+                return;
+            }
+        }
     }
 
     public JobRecord? GetJob(string jobId) => _jobs.TryGetValue(jobId, out var record) ? record : null;
