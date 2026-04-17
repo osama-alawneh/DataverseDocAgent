@@ -17,6 +17,11 @@ builder.Host.UseSerilog((ctx, cfg) => cfg
     .ReadFrom.Configuration(ctx.Configuration)
     .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
     .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+    // NFR-007 — third-party SDKs can emit authority URLs, tenant IDs, or request
+    // payloads at Info/Debug. Clamp to Warning so privacy-policy credential claim
+    // holds even in Development (MinimumLevel=Debug).
+    .MinimumLevel.Override("Microsoft.PowerPlatform.Dataverse.Client", LogEventLevel.Warning)
+    .MinimumLevel.Override("Anthropic", LogEventLevel.Warning)
     .Enrich.FromLogContext()
     .Destructure.With<CredentialDestructuringPolicy>()
     .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"));
