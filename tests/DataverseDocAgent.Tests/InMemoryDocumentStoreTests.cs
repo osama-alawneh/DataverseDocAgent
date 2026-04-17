@@ -96,4 +96,41 @@ public class InMemoryDocumentStoreTests
         await Assert.ThrowsAsync<ArgumentNullException>(
             () => store.StoreAsync(null!, TimeSpan.FromMinutes(1)));
     }
+
+    [Theory]
+    [InlineData(0)]                     // TimeSpan.Zero
+    [InlineData(-1)]                    // negative
+    [InlineData(-TimeSpan.TicksPerDay)] // large negative
+    public async Task StoreAsync_NonPositiveTtl_Throws(long ticks)
+    {
+        var store = NewStore();
+
+        // Pins the boundary check applied in review patch P1 — without it, a
+        // caller passing TimeSpan.Zero hit a mysterious ArgumentOutOfRangeException
+        // deep inside MemoryCacheEntryOptions, surfacing as a 500.
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => store.StoreAsync(new byte[] { 1 }, new TimeSpan(ticks)));
+    }
+
+    [Fact]
+    public async Task StoreAsync_TtlAboveRetentionCap_Throws()
+    {
+        var store = NewStore();
+        var beyondCap = InMemoryDocumentStore.MaxTtl + TimeSpan.FromMinutes(1);
+
+        // NFR-013 — retention cap is enforced at the store boundary so a
+        // misconfigured caller cannot silently extend document retention.
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => store.StoreAsync(new byte[] { 1 }, beyondCap));
+    }
+
+    [Fact]
+    public async Task StoreAsync_TtlAtRetentionCap_Succeeds()
+    {
+        var store = NewStore();
+
+        var token = await store.StoreAsync(new byte[] { 1 }, InMemoryDocumentStore.MaxTtl);
+
+        Assert.NotNull(await store.RetrieveAsync(token));
+    }
 }

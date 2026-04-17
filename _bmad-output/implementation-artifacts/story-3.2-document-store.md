@@ -1,6 +1,6 @@
 # Story 3.2: IDocumentStore — In-Memory Implementation (Phase 1)
 
-Status: review
+Status: done
 
 ## Story
 

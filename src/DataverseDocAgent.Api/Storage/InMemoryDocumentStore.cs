@@ -13,6 +13,11 @@ namespace DataverseDocAgent.Api.Storage;
 /// </summary>
 public sealed class InMemoryDocumentStore : IDocumentStore
 {
+    // NFR-013 — hard cap on retention at the store boundary. Callers pass a TTL that
+    // the download pipeline derives from configuration; enforcing the cap here means a
+    // misconfiguration cannot silently stretch retention past the policy limit.
+    internal static readonly TimeSpan MaxTtl = TimeSpan.FromHours(24);
+
     private readonly IMemoryCache _cache;
 
     public InMemoryDocumentStore(IMemoryCache cache)
@@ -24,9 +29,26 @@ public sealed class InMemoryDocumentStore : IDocumentStore
     {
         ArgumentNullException.ThrowIfNull(documentBytes);
 
+        // Validate TTL at the boundary so out-of-range values surface a named
+        // ArgumentOutOfRangeException instead of a mysterious 500 from deep inside
+        // IMemoryCache (which throws on non-positive TTL and overflows on MaxValue).
+        if (ttl <= TimeSpan.Zero || ttl > MaxTtl)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(ttl),
+                ttl,
+                $"TTL must be positive and no greater than {MaxTtl} (NFR-013 retention cap).");
+        }
+
         // Guid.NewGuid().ToString("N") → 32 hex chars, no hyphens. The "N" format is
         // deliberate: Phase 2's BlobDocumentStore will use the same surface shape for
         // blob names, so the DI swap does not reshape download URLs.
+        //
+        // Phase 1 trust assumption: the download token is a lookup key consumed by an
+        // authenticated endpoint, not an unauthenticated bearer capability. Guid.NewGuid
+        // is "unpredictable enough" only under that assumption — if the token ever gates
+        // an anonymous download URL, switch to RandomNumberGenerator.GetBytes(16) for a
+        // CSPRNG-backed value that does not rely on BCL internals.
         var token = Guid.NewGuid().ToString("N");
 
         var options = new MemoryCacheEntryOptions
