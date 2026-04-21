@@ -1,6 +1,6 @@
 # Story 3.4: Dataverse Tools — Tables, Fields, and Relationships
 
-Status: review
+Status: done
 
 ## Story
 
