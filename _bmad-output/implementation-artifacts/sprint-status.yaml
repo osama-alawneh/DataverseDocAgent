@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-13
-last_updated: 2026-04-20 (story 3-3 get-api-download-token-endpoint → review)
+last_updated: 2026-04-20 (story 3-3 get-api-download-token-endpoint reviewed → done)
 project: DataverseDocAgent
 project_key: NOKEY
 tracking_system: file-system
@@ -63,7 +63,7 @@ development_status:
   3-0-rate-limiting-on-credential-accepting-endpoints: done
   3-1-async-job-infrastructure-job-store-background-service: done
   3-2-idocumentstore-in-memory-implementation-phase-1: done
-  3-3-get-api-download-token-endpoint: review
+  3-3-get-api-download-token-endpoint: done
   3-4-dataverse-tools-tables-fields-relationships: ready-for-dev
   3-5-mode-1-post-api-document-generate-endpoint-and-full-request-to-download-flow: ready-for-dev
   3-6-publisher-prefix-intelligence: backlog

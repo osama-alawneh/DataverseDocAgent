@@ -1,6 +1,6 @@
 # Story 3.3: GET /api/download/{token} Endpoint
 
-Status: review
+Status: done
 
 ## Story
 
@@ -84,3 +84,21 @@ claude-sonnet-4-6
 | Date       | Change                                                                              |
 |------------|-------------------------------------------------------------------------------------|
 | 2026-04-20 | Story 3.3 — implemented `DownloadController` + 5 unit tests. Status → review.       |
+| 2026-04-20 | Story 3.3 — applied code review patches (P1–P7). Status → done.                     |
+
+### Review Findings
+
+- [x] [Review][Patch] Token shape validation + null/empty/whitespace guard — controller-level early-return TOKEN_EXPIRED for malformed input + 32-hex route constraint [src/DataverseDocAgent.Api/Features/Download/DownloadController.cs:30] (blind+edge)
+- [x] [Review][Patch] Add `[AllowAnonymous]` to controller — pin AC-3 against future global auth filters [src/DataverseDocAgent.Api/Features/Download/DownloadController.cs:8] (edge+auditor)
+- [x] [Review][Patch] Propagate `CancellationToken` from `HttpContext.RequestAborted` to `RetrieveAsync` [src/DataverseDocAgent.Api/Features/Download/DownloadController.cs:30] (blind)
+- [x] [Review][Patch] Set `Cache-Control: no-store, private` on download response — token-bearing URL must not be cached by intermediaries [src/DataverseDocAgent.Api/Features/Download/DownloadController.cs:46] (blind)
+- [x] [Review][Patch] Add reflection-based test pinning AC-3 — assert no `[Authorize]` and presence of `[AllowAnonymous]` on `Get` [tests/DataverseDocAgent.Tests/DownloadControllerTests.cs] (auditor)
+- [x] [Review][Patch] Add `NFR-013` to test file header comment for symmetry with controller [tests/DataverseDocAgent.Tests/DownloadControllerTests.cs:1] (auditor)
+- [x] [Review][Patch] Add tests for malformed-token paths (null/empty/whitespace short-circuit) — pin TOKEN_EXPIRED contract [tests/DataverseDocAgent.Tests/DownloadControllerTests.cs] (blind+edge)
+- [x] [Review][Defer] Per-route rate limiting on `/api/download/{token}` — deferred, security follow-up beyond story 3.3 scope (blind+edge)
+- [x] [Review][Defer] Token in URL leaks via referrer / proxy logs — deferred, NFR-level concern; revisit when Phase 3 deployment story lands (blind+edge)
+- [x] [Review][Defer] Stream large `.docx` via `FileStreamResult` — deferred, current docs are small; would require `IDocumentStore` surface change (blind+edge)
+- [x] [Review][Defer] Audit log on every download attempt (success + miss) — deferred, cross-cutting observability concern (blind)
+- [x] [Review][Defer] Reconcile PRD FR-040 (says HTTP 404) with story AC-2 (HTTP 200 + structured body) — deferred, PRD edit, not code (auditor)
+- [x] [Review][Defer] Constant-time token compare / timing side-channel — deferred, store-level, low ROI on a 128-bit GUID (blind)
+- [x] [Review][Defer] Verify token never appears in routing/hosting structured logs — deferred, logging-config audit (edge)
