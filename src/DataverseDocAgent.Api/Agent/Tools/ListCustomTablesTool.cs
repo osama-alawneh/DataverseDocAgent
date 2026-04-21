@@ -95,10 +95,14 @@ public sealed class ListCustomTablesTool : IDataverseTool
 
         var tables = entities.Select(e => new TableDto
         {
-            DisplayName = e.DisplayName?.UserLocalizedLabel?.Label,
-            LogicalName = e.LogicalName,
-            SchemaName  = e.SchemaName,
-            Description = e.Description?.UserLocalizedLabel?.Label,
+            DisplayName  = e.DisplayName?.UserLocalizedLabel?.Label,
+            LogicalName  = e.LogicalName,
+            SchemaName   = e.SchemaName,
+            // Phase 2 limitation (story 3.4 dev notes): solution membership requires a
+            // secondary `solutioncomponent` query. Returning null keeps the JSON shape
+            // forward-compatible — Phase 3 can populate without changing the contract.
+            SolutionName = null,
+            Description  = e.Description?.UserLocalizedLabel?.Label,
         }).ToArray();
 
         return JsonSerializer.Serialize(new { tables }, s_jsonOptions);
@@ -111,6 +115,7 @@ public sealed class ListCustomTablesTool : IDataverseTool
         public string? DisplayName  { get; set; }
         public string? LogicalName  { get; set; }
         public string? SchemaName   { get; set; }
+        public string? SolutionName { get; set; }
         public string? Description  { get; set; }
     }
 }

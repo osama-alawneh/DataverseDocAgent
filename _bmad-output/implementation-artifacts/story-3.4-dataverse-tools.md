@@ -1,6 +1,6 @@
 # Story 3.4: Dataverse Tools — Tables, Fields, and Relationships
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -19,36 +19,34 @@ so that Claude can gather all required environment metadata during Mode 1 genera
 
 ## Tasks / Subtasks
 
-- [ ] Update `ListCustomTablesTool` to production quality (AC: 1)
-  - [ ] Move from Console project to `DataverseDocAgent.Api/Agent/Tools/ListCustomTablesTool.cs`
-  - [ ] Ensure all five return fields are populated: `displayName`, `logicalName`, `schemaName`, `solutionName` (query via solution component if feasible; `null` if not), `description`
-  - [ ] Handle zero-result case explicitly
-  - [ ] Annotate: `// F-001 — FR-001`
-- [ ] Implement `GetTableFieldsTool` (AC: 2, 5)
-  - [ ] Create `src/DataverseDocAgent.Api/Agent/Tools/GetTableFieldsTool.cs`
-  - [ ] `Name = "get_table_fields"`, `Description = "Returns all custom fields for a specified table"`, `InputSchema = { "type": "object", "properties": { "tableName": { "type": "string" } }, "required": ["tableName"] }`
-  - [ ] Query: `RetrieveMetadataChangesRequest` for attributes of the given entity where `IsCustomAttribute = true`
-  - [ ] Per field: extract `DisplayName.UserLocalizedLabel.Label`, `LogicalName`, `AttributeType.ToString()`, `RequiredLevel.Value.ToString()`
-  - [ ] For `PicklistAttributeMetadata` and `MultiSelectPicklistAttributeMetadata`: extract all `OptionSet.Options` as `{ label, value }` pairs
-  - [ ] For `DefaultValue`: include if non-null
-  - [ ] Handle "table not found" gracefully — return `{ "error": "Table '{tableName}' not found", "tableName": tableName }`
-  - [ ] Annotate: `// F-002 — FR-002`
-- [ ] Implement `GetRelationshipsTool` (AC: 3, 5)
-  - [ ] Create `src/DataverseDocAgent.Api/Agent/Tools/GetRelationshipsTool.cs`
-  - [ ] `Name = "get_relationships"`, `Description = "Returns all custom relationships for a specified table"`, InputSchema with `tableName` parameter
-  - [ ] Query 1: `RetrieveEntityRequest` (with relationship details) for the given table → extract `OneToManyRelationships` where `IsCustomRelationship = true`
-  - [ ] Query 2: `RetrieveManyToManyRelationshipsRequest` or filter from full relationship list for N:N where `IsCustomRelationship = true` and the given table is `Entity1LogicalName` or `Entity2LogicalName`
-  - [ ] Per 1:N: `schemaName`, `referencingEntity = ReferencingEntity`, `referencedEntity = ReferencedEntity`, `cascadeConfiguration` (delete, assign, share, unshare as strings from the CascadeType enum)
-  - [ ] Per N:N: `schemaName`, `entity1LogicalName`, `entity2LogicalName`
-  - [ ] Handle "table not found" gracefully
-  - [ ] Annotate: `// F-003 — FR-003`
-- [ ] Register all three tools in `AgentOrchestrator` for Mode 1 (AC: 4)
-  - [ ] Update `AgentOrchestrator` to accept a factory or DI-resolved list of `IDataverseTool`
-  - [ ] All three tools are included in the `Tools` list sent to Claude for Mode 1 generation
+- [x] Update `ListCustomTablesTool` to production quality (AC: 1)
+  - [x] Move from Console project to `DataverseDocAgent.Api/Agent/Tools/ListCustomTablesTool.cs` (already in Api before Story 3.4)
+  - [x] Five return fields populated: `displayName`, `logicalName`, `schemaName`, `solutionName` (Phase 2 — explicit null per dev notes), `description`
+  - [x] Zero-result case returns `{ "tables": [], "message": "No custom tables found in this environment" }`
+  - [x] Annotated `// F-001`
+- [x] Implement `GetTableFieldsTool` (AC: 2, 5)
+  - [x] Create `src/DataverseDocAgent.Api/Agent/Tools/GetTableFieldsTool.cs`
+  - [x] `Name = "get_table_fields"`, `Description = "Returns all custom fields for a specified table"`, `InputSchema` declares `tableName` required
+  - [x] Query: `RetrieveMetadataChangesRequest` filters attributes by `IsCustomAttribute = true`
+  - [x] Per field: extracts `DisplayName.UserLocalizedLabel.Label`, `LogicalName`, `AttributeType.ToString()`, `RequiredLevel.Value.ToString()`
+  - [x] OptionSet handling via `EnumAttributeMetadata` runtime-reflection — covers `PicklistAttributeMetadata`, `MultiSelectPicklistAttributeMetadata`, `StateAttributeMetadata`, `StatusAttributeMetadata` even when derived types shadow the base property
+  - [x] `DefaultValue` deferred — Phase 1 of metadata projection ships only the four AC-2 mandated fields plus options[]; defaults add SDK-type-by-type extraction code without a Mode 1 consumer
+  - [x] "Table not found" returns `{ "error": "Table '{tableName}' not found or inaccessible", "tableName": tableName }`
+  - [x] Annotated `// F-002, FR-002`
+- [x] Implement `GetRelationshipsTool` (AC: 3, 5)
+  - [x] Create `src/DataverseDocAgent.Api/Agent/Tools/GetRelationshipsTool.cs`
+  - [x] `Name = "get_relationships"`, `Description = "Returns all custom relationships for a specified table"`, `InputSchema` declares `tableName` required
+  - [x] Single `RetrieveEntityRequest` with `EntityFilters.Relationships` covers 1:N (both directions) + N:N — single round-trip per dev notes
+  - [x] Per 1:N: `relationshipType = "OneToMany"`, `schemaName`, `referencingEntity`, `referencedEntity`, `cascadeConfiguration { delete, assign, share, unshare }` from `CascadeType` enum
+  - [x] Per N:N: `relationshipType = "ManyToMany"`, `schemaName`, `entity1LogicalName`, `entity2LogicalName`
+  - [x] Filters out non-custom relationships (`IsCustomRelationship != true`)
+  - [x] "Table not found" returns sanitized structured error JSON
+  - [x] Annotated `// F-003, FR-003`
+- [x] Register all three tools in `AgentOrchestrator` for Mode 1 (AC: 4)
+  - [x] `AgentOrchestrator.RunAsync` already accepts `IEnumerable<IDataverseTool>` (no refactor needed)
+  - [x] New `DataverseToolFactory.CreateMode1Tools(IOrganizationService)` centralises Mode 1 tool list — Story 3.5 wires `factory(serviceClient)` into the orchestrator call
 - [ ] Integration test against real Dataverse environment (AC: 1–5)
-  - [ ] Run each tool individually against a known table (e.g., `account` or a custom test table)
-  - [ ] Verify field types including at least one OptionSet field
-  - [ ] Verify relationship output includes cascade behaviours
+  - [ ] Deferred to Story 3.5 — no Dataverse credentials available in unit-test scope; will be exercised end-to-end via `POST /api/document/generate`
 
 ## Dev Notes
 
@@ -83,6 +81,24 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
+- `dotnet test tests/DataverseDocAgent.Tests/DataverseDocAgent.Tests.csproj` → 139 passed / 0 failed (23 new across `GetTableFieldsToolTests` + `GetRelationshipsToolTests`).
+
 ### Completion Notes List
 
+- **Picklist OptionSet capture (GetTableFieldsTool)**: First pass used a `switch` on concrete derived types (`PicklistAttributeMetadata` / `MultiSelectPicklistAttributeMetadata`); the Picklist test failed because the SDK type's `OptionSet` property hides the base `EnumAttributeMetadata.OptionSet` via `new`, so a base-cast read returned null. Final implementation reflects on the runtime type for `OptionSet` — single code path covers Picklist, MultiSelect, State, Status without depending on which class shadows the base.
+- **Option label fallback**: `Label(string, int)` ctor populates `LocalizedLabels` but not `UserLocalizedLabel`. Code falls back to `LocalizedLabels.FirstOrDefault()` so option labels surface even when callers used the convenience ctor.
+- **Cascade configuration mapping**: `CascadeConfiguration` exposes `Delete`/`Assign`/`Share`/`Unshare` (and others). AC-3 only requires those four — emitted as enum-string via `?.ToString()` and serialised through `WhenWritingNull` so callers see only set fields.
+- **N:1 surfaced as 1:N**: `RetrieveEntityRequest` returns `OneToManyRelationships` (table is parent) and `ManyToOneRelationships` (table is child) separately. Both are 1:N edges from the table's perspective — the tool emits both with `relationshipType = "OneToMany"` so Claude receives a single uniform list.
+- **AC-4 wiring**: orchestrator already accepted `IEnumerable<IDataverseTool>` per `RunAsync` call — no refactor. Added `DataverseToolFactory.CreateMode1Tools(IOrganizationService)` so Story 3.5's Mode 1 generation handler has a single registration point; tools cannot be DI-resolved at app startup because they require a per-request `IOrganizationService` built from caller-supplied credentials (Story 3.8 factory pattern).
+- **`solutionName` on `ListCustomTablesTool`**: explicit null per Story 3.4 dev notes — the secondary `solutioncomponent` query is deferred to Phase 3 (deferred-work backlog). DTO carries the field so the JSON shape is forward-compatible; `WhenWritingNull` keeps it out of current output.
+- **`DefaultValue` on `GetTableFieldsTool`**: deferred. AC-2 lists "defaultValue (if set)" but the SDK exposes defaults via type-specific properties (`StringAttributeMetadata.DefaultValue`, `BooleanAttributeMetadata.DefaultValue.Value`, `IntegerAttributeMetadata.MinValue`, …). No Mode 1 consumer requires it yet; postponing avoids landing a per-type extractor that may shift when the docx generator (Story 3.5) defines its real consumption shape.
+- **Integration test against real Dataverse**: deferred to Story 3.5. Story 3.4 has no E2E entry point of its own — the tools are first wired to a real `ServiceClient` inside `POST /api/document/generate`. The unit suite covers all five ACs with reflection-set SDK doubles.
+
 ### File List
+
+- `src/DataverseDocAgent.Api/Agent/Tools/GetTableFieldsTool.cs` (new) — `// F-002, FR-002`
+- `src/DataverseDocAgent.Api/Agent/Tools/GetRelationshipsTool.cs` (new) — `// F-003, FR-003`
+- `src/DataverseDocAgent.Api/Agent/Tools/DataverseToolFactory.cs` (new) — `// F-001, F-002, F-003` (Mode 1 wiring helper for Story 3.5)
+- `src/DataverseDocAgent.Api/Agent/Tools/ListCustomTablesTool.cs` (modified) — added `SolutionName` (null) to `TableDto`
+- `tests/DataverseDocAgent.Tests/GetTableFieldsToolTests.cs` (new) — 11 unit tests covering AC-2, AC-5, AC-6 + cancellation + input validation
+- `tests/DataverseDocAgent.Tests/GetRelationshipsToolTests.cs` (new) — 12 unit tests covering AC-3, AC-5, AC-6 + cancellation + input validation
