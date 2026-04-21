@@ -1,4 +1,5 @@
-// F-001 — Custom table discovery tool
+// F-001, FR-001 — Custom table discovery tool (Story 1.3 baseline + Story 3.4 hardening)
+using System.ServiceModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Xrm.Sdk;
@@ -47,10 +48,35 @@ public sealed class ListCustomTablesTool : IDataverseTool
         // v1.2.10. Token accepted for pipeline symmetry; not observed at SDK boundary until
         // IOrganizationServiceAsync2 adoption lands.
         cancellationToken.ThrowIfCancellationRequested();
-        var entities = FetchCustomEntities();
-        var json     = BuildResultJson(entities);
-        return Task.FromResult(json);
+
+        try
+        {
+            var entities = FetchCustomEntities();
+            var json     = BuildResultJson(entities);
+            return Task.FromResult(json);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Caller cancellation must short-circuit, not be sanitized into a tool result.
+            throw;
+        }
+        catch (FaultException<OrganizationServiceFault>)
+        {
+            // NFR-007 / Story 3.4 sibling consistency — never let the raw SDK message
+            // escape to Claude (it can echo connection-string fragments). Same JSON
+            // contract as GetTableFieldsTool / GetRelationshipsTool: { error }.
+            return Task.FromResult(SerializeError("Failed to list custom tables"));
+        }
+        catch (Exception ex) when (ex is TimeoutException
+                                       or CommunicationException
+                                       or System.Net.Http.HttpRequestException)
+        {
+            return Task.FromResult(SerializeError("Dataverse call failed while listing custom tables"));
+        }
     }
+
+    private static string SerializeError(string message) =>
+        JsonSerializer.Serialize(new { error = message }, s_jsonOptions);
 
     // ── Internal helpers ──────────────────────────────────────────────────────
 

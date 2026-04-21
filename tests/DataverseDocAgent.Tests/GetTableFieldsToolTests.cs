@@ -211,6 +211,137 @@ public class GetTableFieldsToolTests
             () => tool.ExecuteAsync(InputFor("anything"), cts.Token));
     }
 
+    // ── Code-review patches: not-found / paging / fault discrimination ────────
+
+    // Patch P3 — empty EntityMetadata collection must surface as a structured
+    // error, not as an empty `fields:[]` success that would mislead the agent.
+    [Fact]
+    public async Task ExecuteAsync_EmptyEntityMetadata_ReturnsStructuredErrorJson()
+    {
+        var svcMock = new Mock<IOrganizationService>();
+        var emptyResponse = new RetrieveMetadataChangesResponse();
+        emptyResponse.Results["EntityMetadata"] = new EntityMetadataCollection();
+        svcMock.Setup(s => s.Execute(It.IsAny<OrganizationRequest>())).Returns(emptyResponse);
+
+        var tool = new GetTableFieldsTool(svcMock.Object);
+        var json = await tool.ExecuteAsync(InputFor("missing_table"));
+
+        var root = JsonDocument.Parse(json).RootElement;
+        Assert.True(root.TryGetProperty("error", out _));
+        Assert.Equal("missing_table", root.GetProperty("tableName").GetString());
+    }
+
+    // Patch P2 — TimeoutException must be sanitized into structured error,
+    // not bubble out and unwind the agent loop.
+    [Fact]
+    public async Task ExecuteAsync_TimeoutException_ReturnsStructuredErrorJson()
+    {
+        var svcMock = new Mock<IOrganizationService>();
+        svcMock.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+               .Throws(new TimeoutException("network slow"));
+
+        var tool = new GetTableFieldsTool(svcMock.Object);
+        var json = await tool.ExecuteAsync(InputFor("anything"));
+
+        var root = JsonDocument.Parse(json).RootElement;
+        Assert.True(root.TryGetProperty("error", out _));
+        Assert.Equal("anything", root.GetProperty("tableName").GetString());
+    }
+
+    // Patch P5 — BooleanAttributeMetadata exposes BooleanOptionSetMetadata
+    // (not OptionSetMetadata); reflection-based capture would silently drop
+    // the True/False option labels.
+    [Fact]
+    public async Task ExecuteAsync_BooleanAttribute_EmitsTrueFalseOptions()
+    {
+        var attr = new BooleanAttributeMetadata { LogicalName = "new_active" };
+        SetAttributeType(attr, AttributeTypeCode.Boolean);
+        attr.OptionSet = new BooleanOptionSetMetadata(
+            new OptionMetadata(new Label("Yes", 1033), 1),
+            new OptionMetadata(new Label("No",  1033), 0));
+
+        var svcMock = new Mock<IOrganizationService>();
+        svcMock.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+               .Returns(BuildMetadataResponse("new_mytable", attr));
+
+        var tool = new GetTableFieldsTool(svcMock.Object);
+        var json = await tool.ExecuteAsync(InputFor("new_mytable"));
+
+        var f = JsonDocument.Parse(json).RootElement.GetProperty("fields")[0];
+        Assert.True(f.TryGetProperty("options", out var options));
+        Assert.Equal(2, options.GetArrayLength());
+    }
+
+    // Patch P6 — OptionDto.Value must preserve a legitimate value=0 and not
+    // collapse it with null. State.Active is 0; a coerced default would
+    // make value-zero and value-missing indistinguishable.
+    [Fact]
+    public async Task ExecuteAsync_OptionWithValueZero_PreservesZero()
+    {
+        var attr = new PicklistAttributeMetadata { LogicalName = "new_state" };
+        SetAttributeType(attr, AttributeTypeCode.Picklist);
+        attr.OptionSet = BuildOptionSet(("Active", 0), ("Inactive", 1));
+
+        var svcMock = new Mock<IOrganizationService>();
+        svcMock.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+               .Returns(BuildMetadataResponse("new_mytable", attr));
+
+        var tool = new GetTableFieldsTool(svcMock.Object);
+        var json = await tool.ExecuteAsync(InputFor("new_mytable"));
+
+        var first = JsonDocument.Parse(json).RootElement
+            .GetProperty("fields")[0].GetProperty("options")[0];
+        Assert.Equal(0, first.GetProperty("value").GetInt32());
+    }
+
+    // Patch P12 / AC-2 — defaultValue projection for boolean attributes.
+    [Fact]
+    public async Task ExecuteAsync_BooleanAttributeWithDefault_EmitsDefaultValue()
+    {
+        var attr = new BooleanAttributeMetadata { LogicalName = "new_active" };
+        SetAttributeType(attr, AttributeTypeCode.Boolean);
+        SetNonPublic(attr, nameof(BooleanAttributeMetadata.DefaultValue), (bool?)true);
+
+        var svcMock = new Mock<IOrganizationService>();
+        svcMock.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+               .Returns(BuildMetadataResponse("new_mytable", attr));
+
+        var tool = new GetTableFieldsTool(svcMock.Object);
+        var json = await tool.ExecuteAsync(InputFor("new_mytable"));
+
+        var f = JsonDocument.Parse(json).RootElement.GetProperty("fields")[0];
+        Assert.Equal("True", f.GetProperty("defaultValue").GetString());
+    }
+
+    // Patch P14 — distinguish missing param from wrong type so debug logs
+    // for malformed Claude tool calls are not misleading.
+    [Fact]
+    public async Task ExecuteAsync_NumericTableName_ReturnsTypeMismatchError()
+    {
+        var tool = new GetTableFieldsTool(new Mock<IOrganizationService>().Object);
+        var json = await tool.ExecuteAsync(
+            JsonSerializer.Deserialize<JsonElement>("{\"tableName\":123}"));
+        var error = JsonDocument.Parse(json).RootElement.GetProperty("error").GetString();
+        Assert.Contains("must be a string", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Patch P15 — unicode-NBSP and uppercase must be rejected at the validation
+    // layer, not after a misleading "table not found" round-trip.
+    [Theory]
+    [InlineData("Bad_Casing")]
+    [InlineData("has space")]
+    [InlineData("name\u00A0with\u00A0nbsp")]
+    [InlineData("special!chars")]
+    public async Task ExecuteAsync_InvalidLogicalName_ReturnsValidationError(string raw)
+    {
+        var tool = new GetTableFieldsTool(new Mock<IOrganizationService>().Object);
+        var json = await tool.ExecuteAsync(
+            JsonSerializer.Deserialize<JsonElement>(
+                JsonSerializer.Serialize(new { tableName = raw })));
+        var root = JsonDocument.Parse(json).RootElement;
+        Assert.True(root.TryGetProperty("error", out _));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static JsonElement InputFor(string tableName) =>
@@ -270,5 +401,12 @@ public class GetTableFieldsToolTests
         Assert.NotNull(labelObj);
         labelObj!.UserLocalizedLabel = new LocalizedLabel(text, 1033);
         prop.SetValue(attr, labelObj);
+    }
+
+    private static void SetNonPublic(object target, string propertyName, object? value)
+    {
+        var prop = target.GetType().GetProperty(propertyName);
+        Assert.NotNull(prop);
+        prop!.SetValue(target, value);
     }
 }

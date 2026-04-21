@@ -158,6 +158,38 @@ public class ListCustomTablesToolTests
             () => tool.ExecuteAsync(EmptyInput(), cts.Token));
     }
 
+    // ── Story 3.4 patch: SDK fault sanitised into structured error ────────────
+
+    [Fact]
+    public async Task ExecuteAsync_FaultException_ReturnsStructuredErrorJson()
+    {
+        var fault = new System.ServiceModel.FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { Message = "tenant abc-123 secret leaked" });
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.Execute(It.IsAny<OrganizationRequest>())).Throws(fault);
+
+        var tool = new ListCustomTablesTool(svc.Object);
+        var json = await tool.ExecuteAsync(EmptyInput());
+
+        var root = JsonDocument.Parse(json).RootElement;
+        Assert.True(root.TryGetProperty("error", out var err));
+        // Sanitised message must NOT echo the SDK's tenant fragment.
+        Assert.DoesNotContain("tenant", err.GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TimeoutException_ReturnsStructuredErrorJson()
+    {
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+           .Throws(new TimeoutException("network slow"));
+
+        var tool = new ListCustomTablesTool(svc.Object);
+        var json = await tool.ExecuteAsync(EmptyInput());
+
+        Assert.True(JsonDocument.Parse(json).RootElement.TryGetProperty("error", out _));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static JsonElement EmptyInput()

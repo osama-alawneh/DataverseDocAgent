@@ -237,6 +237,149 @@ public class GetRelationshipsToolTests
             () => tool.ExecuteAsync(InputFor("anything"), cts.Token));
     }
 
+    // ── Code-review patches ───────────────────────────────────────────────────
+
+    // Patch P3 — null EntityMetadata response must surface as a structured error
+    // rather than `relationships:[]` which would be indistinguishable from
+    // "table exists but has zero custom relationships".
+    [Fact]
+    public async Task ExecuteAsync_NullEntityMetadata_ReturnsStructuredErrorJson()
+    {
+        var svc = new Mock<IOrganizationService>();
+        var response = new RetrieveEntityResponse();
+        // EntityMetadata not set — typed property returns null.
+        svc.Setup(s => s.Execute(It.IsAny<OrganizationRequest>())).Returns(response);
+
+        var tool = new GetRelationshipsTool(svc.Object);
+        var json = await tool.ExecuteAsync(InputFor("missing"));
+
+        var root = JsonDocument.Parse(json).RootElement;
+        Assert.True(root.TryGetProperty("error", out _));
+        Assert.Equal("missing", root.GetProperty("tableName").GetString());
+    }
+
+    // Patch P2 — TimeoutException sanitized into structured error (NFR-007).
+    [Fact]
+    public async Task ExecuteAsync_TimeoutException_ReturnsStructuredErrorJson()
+    {
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+           .Throws(new TimeoutException("network slow"));
+
+        var tool = new GetRelationshipsTool(svc.Object);
+        var json = await tool.ExecuteAsync(InputFor("anything"));
+
+        Assert.True(JsonDocument.Parse(json).RootElement.TryGetProperty("error", out _));
+    }
+
+    // Patch P10 — schema dedup across OneToMany + ManyToOne for self-referencing
+    // relationships (SDK returns the same schemaName in both arrays).
+    [Fact]
+    public async Task ExecuteAsync_SelfReferencingOneToMany_DeduplicatedBySchemaName()
+    {
+        var rel = BuildOneToMany("new_self_ref", "self_table", "self_table", BuildCascade());
+        // Self-ref edges appear in BOTH OneToMany AND ManyToOne arrays from RetrieveEntity.
+        var entity = BuildEntityMetadata("self_table",
+            oneToMany: new[] { rel },
+            manyToOne: new[] { rel });
+
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+           .Returns(BuildRetrieveEntityResponse(entity));
+
+        var tool = new GetRelationshipsTool(svc.Object);
+        var json = await tool.ExecuteAsync(InputFor("self_table"));
+
+        var rels = JsonDocument.Parse(json).RootElement.GetProperty("relationships");
+        Assert.Equal(1, rels.GetArrayLength());
+    }
+
+    // Patch P9 / AC-3 — defensive: an SDK-returned 1:N edge whose endpoints don't
+    // touch the requested table must be filtered out.
+    [Fact]
+    public async Task ExecuteAsync_OneToManyNotTouchingTable_IsFilteredOut()
+    {
+        var stray = BuildOneToMany("new_stray", "other_a", "other_b", BuildCascade());
+        var entity = BuildEntityMetadata("requested_table", oneToMany: new[] { stray });
+
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+           .Returns(BuildRetrieveEntityResponse(entity));
+
+        var tool = new GetRelationshipsTool(svc.Object);
+        var json = await tool.ExecuteAsync(InputFor("requested_table"));
+
+        Assert.Equal(0, JsonDocument.Parse(json).RootElement.GetProperty("relationships").GetArrayLength());
+    }
+
+    // Patch P8 / AC-3 — defensive N:N filter.
+    [Fact]
+    public async Task ExecuteAsync_ManyToManyNotTouchingTable_IsFilteredOut()
+    {
+        var stray = BuildManyToMany("new_stray_nn", "other_a", "other_b");
+        var entity = BuildEntityMetadata("requested_table", manyToMany: new[] { stray });
+
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+           .Returns(BuildRetrieveEntityResponse(entity));
+
+        var tool = new GetRelationshipsTool(svc.Object);
+        var json = await tool.ExecuteAsync(InputFor("requested_table"));
+
+        Assert.Equal(0, JsonDocument.Parse(json).RootElement.GetProperty("relationships").GetArrayLength());
+    }
+
+    // Patch P11 / AC-3 — all four cascade slots must be present even when SDK
+    // returns null cascade fields. NoCascade is the safe default per CascadeType enum.
+    [Fact]
+    public async Task ExecuteAsync_NullCascadeFields_DefaultedToNoCascadeStrings()
+    {
+        // BuildCascade defaults all four to NoCascade — but the spec requires the
+        // shape to hold even when CascadeConfiguration itself is unset on the SDK.
+        var cascadeWithNulls = new CascadeConfiguration(); // all properties null
+        var rel = BuildOneToMany("new_null_cascade", "child", "parent", cascadeWithNulls);
+
+        var entity = BuildEntityMetadata("parent", oneToMany: new[] { rel });
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+           .Returns(BuildRetrieveEntityResponse(entity));
+
+        var tool = new GetRelationshipsTool(svc.Object);
+        var json = await tool.ExecuteAsync(InputFor("parent"));
+
+        var cascade = JsonDocument.Parse(json).RootElement
+            .GetProperty("relationships")[0].GetProperty("cascadeConfiguration");
+        Assert.Equal("NoCascade", cascade.GetProperty("delete").GetString());
+        Assert.Equal("NoCascade", cascade.GetProperty("assign").GetString());
+        Assert.Equal("NoCascade", cascade.GetProperty("share").GetString());
+        Assert.Equal("NoCascade", cascade.GetProperty("unshare").GetString());
+    }
+
+    // Patch P14 — distinguish missing param from wrong type.
+    [Fact]
+    public async Task ExecuteAsync_NumericTableName_ReturnsTypeMismatchError()
+    {
+        var tool = new GetRelationshipsTool(new Mock<IOrganizationService>().Object);
+        var json = await tool.ExecuteAsync(
+            JsonSerializer.Deserialize<JsonElement>("{\"tableName\":123}"));
+        var error = JsonDocument.Parse(json).RootElement.GetProperty("error").GetString();
+        Assert.Contains("must be a string", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Patch P15 — invalid logical-name shapes rejected at validation, not at SDK.
+    [Theory]
+    [InlineData("Bad_Casing")]
+    [InlineData("has space")]
+    [InlineData("special!chars")]
+    public async Task ExecuteAsync_InvalidLogicalName_ReturnsValidationError(string raw)
+    {
+        var tool = new GetRelationshipsTool(new Mock<IOrganizationService>().Object);
+        var json = await tool.ExecuteAsync(
+            JsonSerializer.Deserialize<JsonElement>(
+                JsonSerializer.Serialize(new { tableName = raw })));
+        Assert.True(JsonDocument.Parse(json).RootElement.TryGetProperty("error", out _));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static JsonElement InputFor(string tableName) =>
