@@ -108,16 +108,24 @@ public static class DocxBuilder
         // heading), so the Section 1 layout matches the Story 3.5 baseline.
         if (tableCount == 0) return;
 
+        // Story 3.6 code-review P3 — TableCount can be >0 while all three
+        // buckets are empty (Claude reports tables but `parsed.Tables` is empty
+        // or every entry has a whitespace LogicalName). Without this guard the
+        // section emits a header + the "no client prefix" sentence and no
+        // table, which is visually confusing. Skip the section.
+        var totalBuckets =
+            prefixSummary.MicrosoftPrefixes.Count +
+            prefixSummary.ClientPrefixes.Count +
+            prefixSummary.UnprefixedTables.Count;
+        if (totalBuckets == 0) return;
+
         AppendHeading(body, "Publisher Prefix Summary", level: 2);
         AppendParagraph(body, BuildPrefixNarrative(prefixSummary));
 
         // AC-6 — breakdown table: Microsoft (desc count) → Client/ISV (desc
         // count) → Unprefixed. Trailing underscore on bucketed prefixes,
-        // literal "(no prefix)" for the Unprefixed row.
-        var rows = new List<string[]>(
-            prefixSummary.MicrosoftPrefixes.Count +
-            prefixSummary.ClientPrefixes.Count +
-            prefixSummary.UnprefixedTables.Count);
+        // literal `PrefixAnalyzer.UnprefixedLabel` for the Unprefixed row.
+        var rows = new List<string[]>(totalBuckets);
 
         foreach (var row in prefixSummary.MicrosoftPrefixes)
         {
@@ -129,22 +137,29 @@ public static class DocxBuilder
         }
         foreach (var row in prefixSummary.UnprefixedTables)
         {
-            // Stored as the literal label by PrefixAnalyzer; do not append "_".
+            // Already carries the literal label from PrefixAnalyzer — do not
+            // append "_" or the row would read "(no prefix)_".
             rows.Add(new[] { row.Prefix, row.ComponentCount.ToString() });
         }
 
-        if (rows.Count > 0)
-        {
-            body.AppendChild(BuildTable(
-                new[] { "Prefix", "Component count" },
-                rows.ToArray()));
-        }
+        body.AppendChild(BuildTable(
+            new[] { "Prefix", "Component count" },
+            rows.ToArray()));
     }
 
     private static string BuildPrefixNarrative(PublisherPrefixSummary p)
     {
         // AC-5 branches are deterministic on the analyzer output shape so the
         // sub-section prose is reproducible across runs (FR-042).
+        //
+        // Note: AC-5 variant 1 carries a pipe-alternation second form
+        // ("n additional non-Microsoft prefixes detected — see breakdown below.")
+        // whose trigger would be "≥2 prefixes in the Client/ISV bucket". That
+        // condition routes into variant 3 instead, so the second form is
+        // unreachable BY DESIGN — variant 1 always emits the
+        // "No third-party ISV components detected." sentence. Story 3.6
+        // code-review P6 — documented inline so a future maintainer does not
+        // mistake the choice for a missing branch.
         if (p.ClientPrefixes.Count == 0)
         {
             return "No client-defined publisher prefix detected — all custom components use default or Microsoft prefixes.";
@@ -164,10 +179,13 @@ public static class DocxBuilder
             return sb.ToString();
         }
 
-        var top = p.ClientPrefixes[0];
+        // Story 3.6 code-review P4 — singular/plural agreement: a primary with
+        // ComponentCount == 1 must read "1 component", not "1 components".
+        var top  = p.ClientPrefixes[0];
+        var unit = top.ComponentCount == 1 ? "component" : "components";
         return
             "Multiple custom prefixes detected — environment may have multiple development teams or migration history. " +
-            $"Primary client prefix: '{top.Prefix}_' ({top.ComponentCount} components). See full breakdown below.";
+            $"Primary client prefix: '{top.Prefix}_' ({top.ComponentCount} {unit}). See full breakdown below.";
     }
 
     private static void AppendCustomTablesSection(Body body, IReadOnlyList<TableInfo> tables)

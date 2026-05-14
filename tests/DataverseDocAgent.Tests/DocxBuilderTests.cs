@@ -2,6 +2,7 @@
 // F-047 — Story 3.6 adds three AC-5 narrative tests + empty-environment guard for
 //         the Publisher Prefix Summary sub-section.
 using DataverseDocAgent.Api.Documents;
+using DataverseDocAgent.Api.Features.DocumentGenerate;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 
@@ -193,7 +194,7 @@ public class DocxBuilderTests
                 new PrefixCount("vel", 5),
                 new PrefixCount("acme", 3),
             },
-            UnprefixedTables       = new[] { new PrefixCount("(no prefix)", 1) },
+            UnprefixedTables       = new[] { new PrefixCount(PrefixAnalyzer.UnprefixedLabel, 1) },
             NoClientPrefixDetected = false,
         };
 
@@ -203,15 +204,87 @@ public class DocxBuilderTests
             "Multiple custom prefixes detected — environment may have multiple development teams or migration history.",
             text);
         Assert.Contains("Primary client prefix: 'vel_' (5 components).", text);
-        // Breakdown order: Microsoft → Client (vel desc, acme next) → Unprefixed.
-        var msdynIdx = text.IndexOf("msdyn_", StringComparison.Ordinal);
-        var velIdx   = text.IndexOf("vel_'", StringComparison.Ordinal); // primary sentence first
-        // Find the *table-row* vel_ — search after the primary-sentence mention.
-        var velRowIdx  = text.IndexOf("vel_", velIdx + 1, StringComparison.Ordinal);
-        var acmeIdx    = text.IndexOf("acme_", StringComparison.Ordinal);
-        var noPrefIdx  = text.IndexOf("(no prefix)", StringComparison.Ordinal);
+        // Story 3.6 code-review P10 — variant 3 must NOT emit the variant-1
+        // "Microsoft components use …" sentence. Lock the prose absence.
+        Assert.DoesNotContain("Microsoft components use", text);
+        // Story 3.6 code-review P14 — anchor breakdown-table assertion on a
+        // stable phrase ("See full breakdown below.") instead of the
+        // primary-sentence apostrophe shape, which is brittle to prose tweaks.
+        var afterNarrative = text.IndexOf("See full breakdown below.", StringComparison.Ordinal);
+        Assert.True(afterNarrative > 0, "Narrative anchor sentence missing.");
+        var msdynIdx  = text.IndexOf("msdyn_", afterNarrative, StringComparison.Ordinal);
+        var velRowIdx = text.IndexOf("vel_",   afterNarrative, StringComparison.Ordinal);
+        var acmeIdx   = text.IndexOf("acme_",  afterNarrative, StringComparison.Ordinal);
+        var noPrefIdx = text.IndexOf(PrefixAnalyzer.UnprefixedLabel, afterNarrative, StringComparison.Ordinal);
         Assert.True(msdynIdx > 0 && velRowIdx > msdynIdx && acmeIdx > velRowIdx && noPrefIdx > acmeIdx,
             $"Expected msdyn_ → vel_ → acme_ → (no prefix), got positions {msdynIdx}/{velRowIdx}/{acmeIdx}/{noPrefIdx}.");
+    }
+
+    [Fact]
+    public void Build_PublisherPrefixSection_SingleClient_NoMicrosoft_DropsMicrosoftSentence()
+    {
+        // Story 3.6 code-review P9 — the "Microsoft components use …" sentence
+        // is gated on a non-empty Microsoft bucket. Lock the gating so a future
+        // refactor cannot emit stray prose like "Microsoft components use .".
+        var summary = new PublisherPrefixSummary
+        {
+            PrimaryClientPrefix    = "vel",
+            MicrosoftPrefixes      = Array.Empty<PrefixCount>(),
+            ClientPrefixes         = new[] { new PrefixCount("vel", 4) },
+            UnprefixedTables       = Array.Empty<PrefixCount>(),
+            NoClientPrefixDetected = false,
+        };
+
+        var text = RenderText(BuildModelWithPrefix(summary, tableCount: 4));
+
+        Assert.Contains("All client customisations use the prefix 'vel_'.", text);
+        Assert.DoesNotContain("Microsoft components use", text);
+        Assert.Contains("No third-party ISV components detected.", text);
+    }
+
+    [Fact]
+    public void Build_PublisherPrefixSection_AllBucketsEmptyWithNonZeroTableCount_OmitsHeader()
+    {
+        // Story 3.6 code-review P3 — defensive: TableCount > 0 but every
+        // PrefixAnalyzer bucket empty (Claude reported tables but the array
+        // came back empty / whitespace-only LogicalName). Section is omitted
+        // entirely to avoid a confusing header + lonely sentence.
+        var summary = new PublisherPrefixSummary
+        {
+            PrimaryClientPrefix    = null,
+            MicrosoftPrefixes      = Array.Empty<PrefixCount>(),
+            ClientPrefixes         = Array.Empty<PrefixCount>(),
+            UnprefixedTables       = Array.Empty<PrefixCount>(),
+            NoClientPrefixDetected = true,
+        };
+
+        var text = RenderText(BuildModelWithPrefix(summary, tableCount: 5));
+
+        Assert.DoesNotContain("Publisher Prefix Summary", text);
+    }
+
+    [Fact]
+    public void Build_PublisherPrefixSection_PrimaryWithOneComponent_UsesSingularUnit()
+    {
+        // Story 3.6 code-review P4 — pluralisation: "(1 component)" not
+        // "(1 components)" when the primary client prefix has count 1.
+        var summary = new PublisherPrefixSummary
+        {
+            PrimaryClientPrefix    = "acme",
+            MicrosoftPrefixes      = Array.Empty<PrefixCount>(),
+            ClientPrefixes         = new[]
+            {
+                new PrefixCount("acme", 1),
+                new PrefixCount("zeta", 1),
+            },
+            UnprefixedTables       = Array.Empty<PrefixCount>(),
+            NoClientPrefixDetected = false,
+        };
+
+        var text = RenderText(BuildModelWithPrefix(summary, tableCount: 2));
+
+        Assert.Contains("Primary client prefix: 'acme_' (1 component).", text);
+        Assert.DoesNotContain("(1 components)", text);
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

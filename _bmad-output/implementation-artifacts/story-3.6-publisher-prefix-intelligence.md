@@ -1,6 +1,6 @@
 # Story 3.6: Publisher Prefix Intelligence
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -131,3 +131,51 @@ claude-sonnet-4-6
 | Date       | Change                                                                       |
 |------------|------------------------------------------------------------------------------|
 | 2026-05-14 | Story 3.6 implemented — PrefixAnalyzer + Publisher Prefix Summary sub-section; 222 tests pass. |
+| 2026-05-14 | Code review patches P1–P14 applied; 230 tests pass. Story → done.            |
+
+### Review Findings
+
+Adversarial review run on 2026-05-14 with three parallel subagents (Blind Hunter — diff-only, Edge Case Hunter — diff + read access, Acceptance Auditor — diff + spec + PRD). Severity rubric: HIGH = wrong output / crash / broken invariant; MED = edge case / coverage gap; LOW = nit. Patches applied below; everything else captured in `_bmad-output/implementation-artifacts/deferred-work.md` under the new heading "Deferred from: code review of story-3.6 (2026-05-14)".
+
+#### Patches applied
+
+- [x] **P1** — `PrefixAnalyzer.Analyze` skips a null `TableInfo` element instead of NRE-ing on `table.LogicalName`. Mirrors the Story 3.5 P3 KeyObservations null-filter pattern. (`src/DataverseDocAgent.Api/Features/DocumentGenerate/PrefixAnalyzer.cs` lines ~51–55)
+- [x] **P2** — `DocumentGenerateService.RunPipelineAsync` strips null entries from `parsed.Tables` before building the model, so both `PrefixAnalyzer` and `DocxBuilder.AppendCustomTablesSection` are protected at the parse boundary. (`src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs`)
+- [x] **P3** — `DocxBuilder.AppendPublisherPrefixSection` returns early when `TableCount > 0` but every prefix bucket is empty (e.g. Claude reported `tableCount` elsewhere yet the array contained only whitespace logical names). Avoids the header + lonely "No client-defined publisher prefix" sentence with no breakdown table. (`src/DataverseDocAgent.Api/Documents/DocxBuilder.cs`)
+- [x] **P4** — Variant 3 prose uses singular `component` when the primary's count is 1 ("1 component" not "1 components"). (`src/DataverseDocAgent.Api/Documents/DocxBuilder.cs#BuildPrefixNarrative`)
+- [x] **P5** — Extract the `(no prefix)` magic literal to `PrefixAnalyzer.UnprefixedLabel`; both the analyzer and the renderer reference the constant so a future rename cannot drift the analyzer's stored label out of sync with the renderer's underscore-suppression branch. (`PrefixAnalyzer.cs`, `DocxBuilder.cs`, tests)
+- [x] **P6** — Inline comment in `BuildPrefixNarrative` documents that AC-5 variant 1's pipe-alternation second form (`"n additional non-Microsoft prefixes detected — see breakdown below."`) is unreachable by design — its trigger (≥2 Client/ISV prefixes) routes into variant 3 instead. Locks the design choice for future maintainers.
+- [x] **P7** — Test pin: `Analyze_LeadingUnderscoreLogicalName_IsBucketedAsUnprefixed` — `_widget` → `UnprefixedLabel`. (`tests/DataverseDocAgent.Tests/PrefixAnalyzerTests.cs`)
+- [x] **P8** — Test pin: `Analyze_BucketsMicrosoftPrefixes` extended with `crm_widget` and `crystal_thing` as expected-Microsoft cases. Locks the spec-accepted over-match contract so a regex tightening cannot silently flip classification. (`PrefixAnalyzerTests.cs`)
+- [x] **P9** — Test: `Build_PublisherPrefixSection_SingleClient_NoMicrosoft_DropsMicrosoftSentence` — variant 1 with empty Microsoft bucket must omit the "Microsoft components use …" sentence. (`DocxBuilderTests.cs`)
+- [x] **P10** — Test: variant-3 (multi-client) test now asserts `Microsoft components use` is absent — locks the prose surface. (`DocxBuilderTests.cs`)
+- [x] **P11** — Integration test asserts `summary.ClientPrefixes[0].Prefix == "vel"`, not only the count, so a regression bucketing by full logical name (instead of segment) would fail. (`DocumentGenerateServiceTests.cs`)
+- [x] **P12** — Test: `Analyze_NullTableEntry_IsSilentlySkipped` — direct callers of the analyzer cannot NRE on a null element. (`PrefixAnalyzerTests.cs`)
+- [x] **P13** — Test: `ParseAgentJson_NullTableEntry_SurvivesAndIsFilteredAtServiceBoundary` — JSON `[null, {...}]` survives parsing and is filtered at the service layer before reaching analyzer/builder. (`DocumentGenerateServiceTests.cs`)
+- [x] **P14** — Variant-3 ordering assertion anchors on the stable phrase `"See full breakdown below."` instead of the primary-sentence apostrophe shape. Robust to future prose tweaks. (`DocxBuilderTests.cs`)
+- [x] **P3b** — `Build_PublisherPrefixSection_AllBucketsEmptyWithNonZeroTableCount_OmitsHeader` test pins the P3 guard.
+
+#### Deferred (see `deferred-work.md`)
+
+- [x] **D-CR1** — Microsoft `cr` regex over-match is spec-accepted; behaviour pinned by P8.
+- [x] **D-CR2** — No length cap on prefix copied into the Word narrative; bounded in practice by Dataverse 50-char logical-name limit. Cross-cutting concern.
+- [x] **D-CR3** — Microsoft narrative list has no upper bound — defer until a real environment surfaces a readability problem.
+- [x] **D-CR4** — Tie-break disclosure on `Primary client prefix` silent — alphabetical determinism is the design.
+- [x] **D-CR5** — `NoClientPrefixDetected` flag redundant with `PrimaryClientPrefix is null`.
+- [x] **D-CR6** — Three-`cr*`-tie ordering test gap.
+- [x] **D-CR7** — `BuildTable` row/header width contract has no defensive assert.
+- [x] **D-CR8** — One-character prefix `v_thing` accepted as Client/ISV.
+- [x] **D-CR9** — Duplicate `LogicalName` from Claude inflates counts.
+- [x] **D-CR10** — Null `PrefixSummary` at render-time not defended (required-init contract makes this theoretical).
+- [x] **D-CR11** — AC-2 spec prose vs implementation cosmetic divergence — behaviourally equivalent and covered by AC-8 tests.
+- [x] **D-CR12** — FR-042 tri-partition collapsed to two buckets — documented spec choice.
+- [x] **D-CR13** — `DateTime.UtcNow` in `ApplyCorePackageMetadata` non-determinism — pre-existing Story 3.5 surface, out of scope.
+
+#### Dismissed
+
+- Local-variable coupling (`var tables` flowing to both analyzer and model in `RunPipelineAsync`) — not a defect, just a fragile-coupling caution. No change.
+- `StringBuilder` allocation for the variant-1 narrative — readability nit, no perf concern. No change.
+- `RegexOptions.Compiled` startup cost — correct choice for the hot path. No change.
+- `using System.Text;` import — single legitimate consumer.
+- "Place analyzer before cancellation gate" — explicitly required by the story spec; not a finding.
+- Determinism of LINQ `OrderBy*` over `Dictionary` enumeration — total-ordered by (count desc, prefix ordinal asc); byte-for-byte stable. No change.

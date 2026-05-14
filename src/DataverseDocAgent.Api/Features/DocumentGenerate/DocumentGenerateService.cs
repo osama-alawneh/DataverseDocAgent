@@ -173,7 +173,13 @@ public sealed class DocumentGenerateService : IGenerationPipeline
         var fieldCount        = parsed.Fields?.Values.Sum(f => f?.Count ?? 0) ?? 0;
         var relationshipCount = parsed.Relationships?.Values.Sum(r => r?.Count ?? 0) ?? 0;
         var rating            = ComplexityRater.Rate(tableCount, fieldCount, relationshipCount);
-        var tables            = (IReadOnlyList<TableInfo>?)parsed.Tables ?? Array.Empty<TableInfo>();
+        // Story 3.6 code-review P2 — strip null entries before the model is
+        // built. JSON `[null, {...}]` deserialises to a real null in the list;
+        // both PrefixAnalyzer and DocxBuilder would NRE on the element. Mirrors
+        // the Story 3.5 P3 KeyObservations filter at the parse boundary.
+        var tables = (IReadOnlyList<TableInfo>?)(
+            parsed.Tables?.Where(t => t is not null).ToList())
+            ?? Array.Empty<TableInfo>();
 
         // Story 3.6 — F-047 / FR-042. Deterministic publisher-prefix breakdown,
         // computed BEFORE the cancellation gate so a cancelled job emits no

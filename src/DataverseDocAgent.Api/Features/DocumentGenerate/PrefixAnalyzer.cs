@@ -26,6 +26,11 @@ namespace DataverseDocAgent.Api.Features.DocumentGenerate;
 /// </summary>
 public static class PrefixAnalyzer
 {
+    // Shared label for the Unprefixed bucket row. Renderer keys off this exact
+    // literal to skip the trailing-underscore decoration, so the constant must
+    // live next to the value that produces it. Story 3.6 code-review P5.
+    public const string UnprefixedLabel = "(no prefix)";
+
     // Microsoft-owned prefixes that are exact-matched against the lowercase
     // prefix segment. Trailing underscore is omitted here because the
     // segmentation step strips it; DocxBuilder re-attaches it at render time.
@@ -50,6 +55,11 @@ public static class PrefixAnalyzer
 
         foreach (var table in tables)
         {
+            // Story 3.6 code-review P1 — JSON `[null, ...]` deserialises to a
+            // real null entry; mirrors Story 3.5 P3 (KeyObservations null
+            // filtering). Skip rather than NRE on `table.LogicalName`.
+            if (table is null) continue;
+
             var logical = table.LogicalName;
             if (string.IsNullOrWhiteSpace(logical))
             {
@@ -86,7 +96,7 @@ public static class PrefixAnalyzer
         var clientList    = OrderByCountThenAlpha(clientCounts);
 
         var unprefixedList = unprefixedCount > 0
-            ? (IReadOnlyList<PrefixCount>)new[] { new PrefixCount("(no prefix)", unprefixedCount) }
+            ? (IReadOnlyList<PrefixCount>)new[] { new PrefixCount(UnprefixedLabel, unprefixedCount) }
             : Array.Empty<PrefixCount>();
 
         var primary = clientList.Count > 0 ? clientList[0].Prefix : null;

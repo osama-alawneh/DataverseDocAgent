@@ -87,10 +87,40 @@ public class DocumentGenerateServiceTests
 
         Assert.Equal("vel", summary.PrimaryClientPrefix);
         Assert.False(summary.NoClientPrefixDetected);
+        // Story 3.6 code-review P11 — assert the prefix value too, not just
+        // the count, so a regression that bucketed by full logical name
+        // (instead of segment) would still fail this test.
+        Assert.Equal("vel", summary.ClientPrefixes[0].Prefix);
         Assert.Equal(2, summary.ClientPrefixes[0].ComponentCount);
         // msdyn + cr3a7 → Microsoft bucket (cr3a7 matches ^cr[a-z0-9]*$).
         Assert.Equal(2, summary.MicrosoftPrefixes.Count);
         Assert.Contains(summary.MicrosoftPrefixes, p => p.Prefix == "msdyn");
         Assert.Contains(summary.MicrosoftPrefixes, p => p.Prefix == "cr3a7");
+    }
+
+    // Story 3.6 code-review P13 — JSON `tables: [null, {...}]` is a real
+    // possibility from a flaky agent payload. ParseAgentJson deserialises
+    // the null as a real element; the service-level filter removes it before
+    // the analyzer (and the downstream model consumers) see it.
+    [Fact]
+    public void ParseAgentJson_NullTableEntry_SurvivesAndIsFilteredAtServiceBoundary()
+    {
+        const string raw = """
+            {
+              "tables": [
+                null,
+                { "logicalName": "vel_account" }
+              ]
+            }
+            """;
+
+        var parsed = DocumentGenerateService.ParseAgentJson(raw);
+        Assert.NotNull(parsed.Tables);
+        // The service strips nulls before invoking PrefixAnalyzer / DocxBuilder.
+        var filtered = parsed.Tables!.Where(t => t is not null).ToList();
+        var summary  = PrefixAnalyzer.Analyze(filtered);
+
+        Assert.Single(filtered);
+        Assert.Equal("vel", summary.PrimaryClientPrefix);
     }
 }

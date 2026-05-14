@@ -25,16 +25,22 @@ public class PrefixAnalyzerTests
     }
 
     [Theory]
-    [InlineData("msdyn_thing",  true)]
-    [InlineData("msft_widget",  true)]
-    [InlineData("adx_setting",  true)]
-    [InlineData("cr_legacy",    true)]    // bare cr (AC-2 exact set)
-    [InlineData("cr3a7_table",  true)]    // Power Apps default-environment auto-prefix
-    [InlineData("crf2b_table",  true)]
-    [InlineData("crxyz_table",  true)]
-    [InlineData("vel_account",  false)]
-    [InlineData("new_widget",   false)]
-    [InlineData("doc_form",     false)]
+    [InlineData("msdyn_thing",   true)]
+    [InlineData("msft_widget",   true)]
+    [InlineData("adx_setting",   true)]
+    [InlineData("cr_legacy",     true)]    // bare cr (AC-2 exact set)
+    [InlineData("cr3a7_table",   true)]    // Power Apps default-environment auto-prefix
+    [InlineData("crf2b_table",   true)]
+    [InlineData("crxyz_table",   true)]
+    // Story 3.6 code-review P8 — spec-accepted over-match: any cr* prefix is
+    // bucketed Microsoft. Pin this with a negative case to prevent a future
+    // regex tightening from silently flipping classification. The risk is
+    // documented in deferred-work.md.
+    [InlineData("crm_widget",    true)]    // intentional over-match: real ISV with cr* prefix → Microsoft.
+    [InlineData("crystal_thing", true)]
+    [InlineData("vel_account",   false)]
+    [InlineData("new_widget",    false)]
+    [InlineData("doc_form",      false)]
     public void Analyze_BucketsMicrosoftPrefixes(string logicalName, bool expectedMicrosoft)
     {
         var summary = PrefixAnalyzer.Analyze(new[] { Table(logicalName) });
@@ -107,6 +113,33 @@ public class PrefixAnalyzerTests
         Assert.Equal("(no prefix)", summary.UnprefixedTables[0].Prefix);
         Assert.Equal(1, summary.UnprefixedTables[0].ComponentCount);
         Assert.Equal("vel", summary.PrimaryClientPrefix);
+    }
+
+    [Fact]
+    public void Analyze_LeadingUnderscoreLogicalName_IsBucketedAsUnprefixed()
+    {
+        // Story 3.6 code-review P7 — `_widget` has underscoreIndex == 0,
+        // which the analyzer treats as "no recognisable prefix" → Unprefixed.
+        // Pin this so a future maintainer does not silently flip the rule.
+        var summary = PrefixAnalyzer.Analyze(new[] { Table("_widget") });
+
+        Assert.Single(summary.UnprefixedTables);
+        Assert.Equal(PrefixAnalyzer.UnprefixedLabel, summary.UnprefixedTables[0].Prefix);
+        Assert.Empty(summary.MicrosoftPrefixes);
+        Assert.Empty(summary.ClientPrefixes);
+    }
+
+    [Fact]
+    public void Analyze_NullTableEntry_IsSilentlySkipped()
+    {
+        // Story 3.6 code-review P1 — JSON `[null, {...}]` produces a real null
+        // element in `parsed.Tables`. Service-level filter also runs, but the
+        // analyzer must defend independently so direct callers cannot NRE.
+        var tables = new TableInfo?[] { null, new TableInfo { LogicalName = "vel_account" } };
+        var summary = PrefixAnalyzer.Analyze(tables!);
+
+        Assert.Equal("vel", summary.PrimaryClientPrefix);
+        Assert.Equal(1, summary.ClientPrefixes[0].ComponentCount);
     }
 
     [Fact]
