@@ -98,6 +98,57 @@ public class DocumentGenerateServiceTests
         Assert.Contains(summary.MicrosoftPrefixes, p => p.Prefix == "cr3a7");
     }
 
+    // Story 3.7 AC-11 — DocumentGenerateService must defend against a Claude
+    // response that omits the `applicationUsers` key entirely (e.g. older
+    // four-key shape from Story 3.5, or a prompt-drift regression). The
+    // missing key parses as a null `ApplicationUsers` on AgentJsonModel and
+    // is safe-coalesced to an empty list before the renderer sees it — the
+    // pipeline must NOT raise AI_ERROR for this case.
+    [Fact]
+    public void ParseAgentJson_MissingApplicationUsersKey_DeserialisesToNull_ForSafeCoalesce()
+    {
+        const string raw = """
+            {
+              "organisation": { "environmentName": "Contoso" },
+              "tables": [
+                { "logicalName": "vel_account" }
+              ]
+            }
+            """;
+
+        var parsed = DocumentGenerateService.ParseAgentJson(raw);
+
+        // Null sentinel — service-level safe-coalesce (parsed.ApplicationUsers?…
+        // ?? Array.Empty<ApplicationUserInfo>()) turns this into the empty
+        // Section 5 render branch (AC-10).
+        Assert.Null(parsed.ApplicationUsers);
+    }
+
+    // Story 3.7 — null entry inside the applicationUsers array (analogous to
+    // the Story 3.6 P13 tables-null filter). The service strips nulls before
+    // the renderer touches the list.
+    [Fact]
+    public void ParseAgentJson_NullApplicationUserEntry_SurvivesAndIsFilteredAtServiceBoundary()
+    {
+        const string raw = """
+            {
+              "applicationUsers": [
+                null,
+                { "displayName": "Sync App", "applicationId": "11111111-1111-1111-1111-111111111111",
+                  "roles": ["Reader"] }
+              ]
+            }
+            """;
+
+        var parsed = DocumentGenerateService.ParseAgentJson(raw);
+        Assert.NotNull(parsed.ApplicationUsers);
+        var filtered = parsed.ApplicationUsers!.Where(u => u is not null).ToList();
+
+        Assert.Single(filtered);
+        Assert.Equal("Sync App", filtered[0].DisplayName);
+        Assert.Equal(new[] { "Reader" }, filtered[0].Roles);
+    }
+
     // Story 3.6 code-review P13 — JSON `tables: [null, {...}]` is a real
     // possibility from a flaky agent payload. ParseAgentJson deserialises
     // the null as a real element; the service-level filter removes it before

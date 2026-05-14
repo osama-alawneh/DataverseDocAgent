@@ -1,5 +1,6 @@
 // F-013 — FR-013 — DocxBuilder produces the Mode 1 .docx (Story 3.5, PRD §8.1)
 // F-047 — FR-042 — Publisher Prefix Summary sub-section (Story 3.6)
+// F-055 — FR-050 — Section 5 "Application Users (Integration Signals)" (Story 3.7)
 using System.Text;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
@@ -41,6 +42,7 @@ public static class DocxBuilder
             AppendCustomTablesSection(body, model.Tables);
             AppendFieldCatalogueSection(body, model.Tables, model.Fields);
             AppendRelationshipMapSection(body, model.Tables, model.Relationships);
+            AppendApplicationUsersSection(body, model.Tables, model.ApplicationUsers);
 
             mainPart.Document.Save();
         }
@@ -248,6 +250,52 @@ public static class DocxBuilder
                 new[] { "Field Name", "Logical Name", "Type", "Required", "Description" },
                 rows));
         }
+    }
+
+    // ── Story 3.7 — Section 5: Application Users (Integration Signals) ───────
+
+    private const string ApplicationUsersProse =
+        "Application users are typically used by external integrations. The following "
+        + "application users are registered and may be writing to tables in this environment.";
+
+    private const string NoApplicationUsersSentence =
+        "No application users registered in this environment.";
+
+    private static void AppendApplicationUsersSection(
+        Body body,
+        IReadOnlyList<TableInfo> tables,
+        IReadOnlyList<ApplicationUserInfo> applicationUsers)
+    {
+        // AC-10 — section is suppressed only when the document is otherwise
+        // empty (no tables AND no application users). For any populated
+        // environment the section header + FR-050 prose paragraph is always
+        // present, even when the user list itself is empty.
+        if (tables.Count == 0 && applicationUsers.Count == 0) return;
+
+        AppendHeading(body, "5. Application Users (Integration Signals)", level: 1);
+        AppendParagraph(body, ApplicationUsersProse);
+
+        if (applicationUsers.Count == 0)
+        {
+            AppendParagraph(body, NoApplicationUsersSentence);
+            return;
+        }
+
+        // AC-9 — three-column table: Display Name | Application ID | Roles.
+        // Empty role list renders the literal "(no roles assigned)" so the
+        // cell is never blank; the sentinel "(role lookup unavailable)" from
+        // GetApplicationUsersTool is preserved verbatim because it survives
+        // the same join path.
+        var rows = applicationUsers.Select(u => new[]
+        {
+            u.DisplayName   ?? string.Empty,
+            u.ApplicationId ?? string.Empty,
+            u.Roles is { Count: > 0 } ? string.Join(", ", u.Roles) : "(no roles assigned)",
+        }).ToArray();
+
+        body.AppendChild(BuildTable(
+            new[] { "Display Name", "Application ID", "Roles" },
+            rows));
     }
 
     private static void AppendRelationshipMapSection(

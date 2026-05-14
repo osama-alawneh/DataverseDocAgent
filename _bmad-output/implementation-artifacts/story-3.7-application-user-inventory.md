@@ -1,6 +1,6 @@
 # Story 3.7: Application User Inventory
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -27,43 +27,43 @@ so that I can identify which external integrations are writing to this environme
 
 ## Tasks / Subtasks
 
-- [ ] Implement `GetApplicationUsersTool` (AC: 1, 2, 3, 4, 5)
-  - [ ] Create `src/DataverseDocAgent.Api/Agent/Tools/GetApplicationUsersTool.cs`
-  - [ ] Constructor takes `IOrganizationService` only — same shape as siblings; no environment URL needed.
-  - [ ] First query: `QueryExpression` against `systemuser` with `ColumnSet("fullname", "applicationid", "internalemailaddress")` and filter `isdisabled = false AND islicensed = false AND applicationid != null`. Use `_service.RetrieveMultiple(query)` synchronously (matches Story 3.4 / 3.5 pattern; sync-SDK limitation already in deferred-work.md).
-  - [ ] For each result `Entity`, build a per-user role list via a second `QueryExpression` against `systemuserroles` linked to `role`: link-entity from `systemuserroles.roleid → role.roleid`, filter `systemuserroles.systemuserid = <currentUserId>`, columns `role.name`. Try/catch around this per-user query — on any `FaultException<OrganizationServiceFault>`, `TimeoutException`, `CommunicationException`, or `HttpRequestException`, set the user's role list to `[ "(role lookup unavailable)" ]` and continue.
-  - [ ] `OperationCanceledException` from either query MUST propagate (do NOT swallow inside the per-user catch; use `when` clauses to exclude OCE — matches `ListCustomTablesTool` precedent).
-  - [ ] Outer try/catch on the initial `systemuser` query returns the structured `{ "error": "Failed to list application users" }` JSON for SDK faults / timeouts / WCF channel faults (matches sibling tools).
-  - [ ] Annotate file header: `// F-055 — FR-050 — Integration Signal Detection: App User Inventory (Story 3.7)`. Add `// NFR-007` inline at the per-user role-lookup catch block to pin the no-message-leak intent.
-- [ ] Wire the tool into `DataverseToolFactory` (AC: 6)
-  - [ ] Append `new GetApplicationUsersTool(service)` as the 5th element of the array returned by `CreateMode1Tools`.
-  - [ ] Update `DataverseToolFactoryTests.CreateMode1Tools_ReturnsExactlyFourNamedTools` → rename to `_ReturnsExactlyFiveNamedTools` and assert the new tool name in the trailing slot.
-- [ ] Extend `PromptBuilder.BuildMode1Prompt()` (AC: 7)
-  - [ ] Add step `5.` "Call `get_application_users` once to retrieve every application user (non-human integration principal) registered in the environment."
-  - [ ] Add `applicationUsers` key to the prescribed JSON shape with the four fields per AC-7.
-  - [ ] Add the "Pass the role array through verbatim" rule alongside the existing rules block.
-  - [ ] Update `PromptBuilderTests` to assert `get_application_users` and the `applicationUsers` output key are mentioned.
-- [ ] Extend the document model (AC: 8)
-  - [ ] Add `ApplicationUserInfo` sealed class in `src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs`.
-  - [ ] Add `required IReadOnlyList<ApplicationUserInfo> ApplicationUsers { get; init; }` at the top level of `GeneratedDocumentModel` (peer to `Tables`/`Fields`/`Relationships`, not nested under `Summary`).
-  - [ ] Update Story 3.5 `BuildSampleModel` in `DocxBuilderTests` to set the new field — flag this as the breaking-test fix in the PR.
-- [ ] Parse the new section in `DocumentGenerateService` (AC: 11)
-  - [ ] Extend the internal `AgentJsonModel` DTO with `List<ApplicationUserInfo>? ApplicationUsers { get; set; }`.
-  - [ ] In `RunPipelineAsync`, pass `(IReadOnlyList<ApplicationUserInfo>?)parsed.ApplicationUsers ?? Array.Empty<ApplicationUserInfo>()` into the model build. Defence-in-depth: a Claude response that drops the `applicationUsers` key is rendered as the "no users" section, not as an AI_ERROR.
-- [ ] Render Section 5 in `DocxBuilder` (AC: 9, 10)
-  - [ ] New private helper `AppendApplicationUsersSection(body, applicationUsers)`.
-  - [ ] Skip rendering only when `model.Tables.Count == 0 && model.ApplicationUsers.Count == 0` (AC-10 "always present unless the document is otherwise empty").
-  - [ ] H1 heading exactly `"5. Application Users (Integration Signals)"`.
-  - [ ] Always render the FR-050 literal prose paragraph (single sentence per AC-9).
-  - [ ] If `applicationUsers.Count == 0`: render the literal sentence `"No application users registered in this environment."` and return.
-  - [ ] Otherwise: render a `BuildTable` with headers `[ "Display Name", "Application ID", "Roles" ]` and one row per user. Roles joined with `", "`; empty roles list renders as the literal `"(no roles assigned)"` so the cell is never blank.
-  - [ ] Call the helper at the end of `AppendRelationshipMapSection`'s sibling slot inside `Build`, after `AppendRelationshipMapSection(body, model.Tables, model.Relationships)`.
-- [ ] Tests (AC: 12)
-  - [ ] Create `tests/DataverseDocAgent.Tests/GetApplicationUsersToolTests.cs` covering the four scenarios in AC-12 against a mocked `IOrganizationService`. Mock `_service.RetrieveMultiple` to return a controlled `EntityCollection`; for per-user role queries match by linked-entity filter so different mocked responses can be returned per user.
-  - [ ] Extend `tests/DataverseDocAgent.Tests/DataverseToolFactoryTests.cs` per AC-6.
-  - [ ] Extend `tests/DataverseDocAgent.Tests/PromptBuilderTests.cs` per AC-7.
-  - [ ] Extend `tests/DataverseDocAgent.Tests/DocxBuilderTests.cs` with two new tests: populated section + empty-list section. Both assert the literal FR-050 prose and (for populated) the three-column table.
-  - [ ] Extend `tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs` to cover the missing-key defence (AC-11).
+- [x] Implement `GetApplicationUsersTool` (AC: 1, 2, 3, 4, 5)
+  - [x] Create `src/DataverseDocAgent.Api/Agent/Tools/GetApplicationUsersTool.cs`
+  - [x] Constructor takes `IOrganizationService` only — same shape as siblings; no environment URL needed.
+  - [x] First query: `QueryExpression` against `systemuser` with `ColumnSet("fullname", "applicationid", "internalemailaddress")` and filter `isdisabled = false AND islicensed = false AND applicationid != null`. Use `_service.RetrieveMultiple(query)` synchronously (matches Story 3.4 / 3.5 pattern; sync-SDK limitation already in deferred-work.md).
+  - [x] For each result `Entity`, build a per-user role list via a second `QueryExpression` against `systemuserroles` linked to `role`: link-entity from `systemuserroles.roleid → role.roleid`, filter `systemuserroles.systemuserid = <currentUserId>`, columns `role.name`. Try/catch around this per-user query — on any `FaultException<OrganizationServiceFault>`, `TimeoutException`, `CommunicationException`, or `HttpRequestException`, set the user's role list to `[ "(role lookup unavailable)" ]` and continue.
+  - [x] `OperationCanceledException` from either query MUST propagate (do NOT swallow inside the per-user catch; use `when` clauses to exclude OCE — matches `ListCustomTablesTool` precedent).
+  - [x] Outer try/catch on the initial `systemuser` query returns the structured `{ "error": "Failed to list application users" }` JSON for SDK faults / timeouts / WCF channel faults (matches sibling tools).
+  - [x] Annotate file header: `// F-055 — FR-050 — Integration Signal Detection: App User Inventory (Story 3.7)`. Add `// NFR-007` inline at the per-user role-lookup catch block to pin the no-message-leak intent.
+- [x] Wire the tool into `DataverseToolFactory` (AC: 6)
+  - [x] Append `new GetApplicationUsersTool(service)` as the 5th element of the array returned by `CreateMode1Tools`.
+  - [x] Update `DataverseToolFactoryTests.CreateMode1Tools_ReturnsExactlyFourNamedTools` → rename to `_ReturnsExactlyFiveNamedTools` and assert the new tool name in the trailing slot.
+- [x] Extend `PromptBuilder.BuildMode1Prompt()` (AC: 7)
+  - [x] Add step `5.` "Call `get_application_users` once to retrieve every application user (non-human integration principal) registered in the environment."
+  - [x] Add `applicationUsers` key to the prescribed JSON shape with the four fields per AC-7.
+  - [x] Add the "Pass the role array through verbatim" rule alongside the existing rules block.
+  - [x] Update `PromptBuilderTests` to assert `get_application_users` and the `applicationUsers` output key are mentioned.
+- [x] Extend the document model (AC: 8)
+  - [x] Add `ApplicationUserInfo` sealed class in `src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs`.
+  - [x] Add `required IReadOnlyList<ApplicationUserInfo> ApplicationUsers { get; init; }` at the top level of `GeneratedDocumentModel` (peer to `Tables`/`Fields`/`Relationships`, not nested under `Summary`).
+  - [x] Update Story 3.5 `BuildSampleModel` in `DocxBuilderTests` to set the new field — flag this as the breaking-test fix in the PR.
+- [x] Parse the new section in `DocumentGenerateService` (AC: 11)
+  - [x] Extend the internal `AgentJsonModel` DTO with `List<ApplicationUserInfo>? ApplicationUsers { get; set; }`.
+  - [x] In `RunPipelineAsync`, pass `(IReadOnlyList<ApplicationUserInfo>?)parsed.ApplicationUsers ?? Array.Empty<ApplicationUserInfo>()` into the model build. Defence-in-depth: a Claude response that drops the `applicationUsers` key is rendered as the "no users" section, not as an AI_ERROR.
+- [x] Render Section 5 in `DocxBuilder` (AC: 9, 10)
+  - [x] New private helper `AppendApplicationUsersSection(body, applicationUsers)`.
+  - [x] Skip rendering only when `model.Tables.Count == 0 && model.ApplicationUsers.Count == 0` (AC-10 "always present unless the document is otherwise empty").
+  - [x] H1 heading exactly `"5. Application Users (Integration Signals)"`.
+  - [x] Always render the FR-050 literal prose paragraph (single sentence per AC-9).
+  - [x] If `applicationUsers.Count == 0`: render the literal sentence `"No application users registered in this environment."` and return.
+  - [x] Otherwise: render a `BuildTable` with headers `[ "Display Name", "Application ID", "Roles" ]` and one row per user. Roles joined with `", "`; empty roles list renders as the literal `"(no roles assigned)"` so the cell is never blank.
+  - [x] Call the helper at the end of `AppendRelationshipMapSection`'s sibling slot inside `Build`, after `AppendRelationshipMapSection(body, model.Tables, model.Relationships)`.
+- [x] Tests (AC: 12)
+  - [x] Create `tests/DataverseDocAgent.Tests/GetApplicationUsersToolTests.cs` covering the four scenarios in AC-12 against a mocked `IOrganizationService`. Mock `_service.RetrieveMultiple` to return a controlled `EntityCollection`; for per-user role queries match by linked-entity filter so different mocked responses can be returned per user.
+  - [x] Extend `tests/DataverseDocAgent.Tests/DataverseToolFactoryTests.cs` per AC-6.
+  - [x] Extend `tests/DataverseDocAgent.Tests/PromptBuilderTests.cs` per AC-7.
+  - [x] Extend `tests/DataverseDocAgent.Tests/DocxBuilderTests.cs` with two new tests: populated section + empty-list section. Both assert the literal FR-050 prose and (for populated) the three-column table.
+  - [x] Extend `tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs` to cover the missing-key defence (AC-11).
 
 ## Dev Notes
 
@@ -118,10 +118,42 @@ No new csproj packages required.
 
 ### Agent Model Used
 
-claude-sonnet-4-6
+claude-opus-4-7
 
 ### Debug Log References
 
+- 2026-05-14 dev — first `dotnet test` pass after fixture changes failed `Build_ApplicationUsersSection_EmptyList_PopulatedEnvironment_RendersHeadingAndFallbackProse` because `BuildModelWithApplicationUsers` hard-coded `Tables = Array.Empty<TableInfo>()` while exercising `tableCount > 0`. `AppendApplicationUsersSection` (correctly) gates on `model.Tables.Count`, not the summary counter, so the section was suppressed. Fix: helper now synthesises a placeholder `TableInfo` per `tableCount` so the AC-10 "populated environment" branch is reached. All 247 tests pass after the fix.
+
 ### Completion Notes List
 
+- Implemented `GetApplicationUsersTool` as the 5th Mode 1 tool. JSON output keys (`displayName`, `applicationId`, `email`, `roles`) deliberately mirror the Claude-output shape so AC-7's "pass the role array through verbatim" rule is a no-op rename rather than a per-key remap.
+- Per-user role isolation: try/catch around the secondary `QueryExpression` swallows only `FaultException<OrganizationServiceFault>` / `TimeoutException` / `CommunicationException` / `HttpRequestException`; `OperationCanceledException` propagates via `when (cancellationToken.IsCancellationRequested)` filter so the orchestrator's cancellation contract is intact.
+- Sentinel `(role lookup unavailable)` exposed via `GetApplicationUsersTool.RoleLookupUnavailableSentinel` `public const string` so both the analyzer-style consumer (tests) and any future renderer can reference the literal without drift.
+- `GeneratedDocumentModel.ApplicationUsers` is `required` at the top level — peer to `Tables` / `Fields` / `Relationships`, NOT nested under `Summary`. Story 3.6's `ExecutiveSummary.PrefixSummary` precedent influenced this choice but Section 5 is rendered post-Section-4 (Technical Reference Layer per FR-050 / ADR-007), so a top-level slot keeps the executive-summary boundary clean.
+- `DocumentGenerateService.AgentJsonModel.ApplicationUsers` is optional (nullable). A backwards-compatible four-key Claude response from Story 3.5 deserialises with `ApplicationUsers == null` and the safe-coalesce (`?.Where(u => u is not null).ToList() ?? Array.Empty<ApplicationUserInfo>()`) renders the empty Section 5 instead of raising `AI_ERROR`. Mirrors Story 3.6 P2 null-entry filter at the parse boundary.
+- `DocxBuilder.AppendApplicationUsersSection` is suppressed only when both `model.Tables.Count == 0` AND `model.ApplicationUsers.Count == 0` (AC-10 "nothing else in the document either"). Headers always present whenever either collection is non-empty; the literal "No application users registered…" sentence covers the empty-list branch.
+- PRD §5.4 row added (`SystemUser | Read | ... | Never`) per story Dev Notes recommended option 1. **Note:** `SecurityCheckService.RequiredPrivileges` was NOT updated in this commit — adding `Read SystemUser` would require updating 6+ test count assertions (12 → 13 across `RequiredPrivileges_HasExactly12Entries`, `ComputePrivilegeSets_*`, etc.) plus a new `[InlineData("prvReadSystemUser", "Read SystemUser")]` row. The handoff prompt explicitly capped diversions to "a single inline-data row addition" and instructed STOP-and-defer otherwise. The mismatch between PRD §5.4 (now 13 rows) and `SecurityCheckService.RequiredPrivileges` (still 12 entries) is intentionally deferred to a follow-up commit and documented in `deferred-work.md`.
+- Tests: 247 pass (was 230 pre-story). New: 9 `GetApplicationUsersToolTests` cases + 4 `DocxBuilderTests` Section-5 branches + 1 `PromptBuilderTests` assertion + 1 `DataverseToolFactoryTests` rename (with trailing-slot pin) + 2 `DocumentGenerateServiceTests` (missing-key defence + null-entry filter).
+
 ### File List
+
+- `src/DataverseDocAgent.Api/Agent/Tools/GetApplicationUsersTool.cs` (new)
+- `src/DataverseDocAgent.Api/Agent/Tools/DataverseToolFactory.cs` (modified — 5th tool registered, XML doc reflects new count)
+- `src/DataverseDocAgent.Api/Agent/PromptBuilder.cs` (modified — step 5 + `applicationUsers` JSON key + role-passthrough rule)
+- `src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs` (modified — `ApplicationUserInfo` + required `ApplicationUsers` top-level slot)
+- `src/DataverseDocAgent.Api/Documents/DocxBuilder.cs` (modified — `AppendApplicationUsersSection` helper + call-site in `Build`)
+- `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs` (modified — `AgentJsonModel.ApplicationUsers` + safe-coalesce + null-entry filter in `RunPipelineAsync`)
+- `tests/DataverseDocAgent.Tests/GetApplicationUsersToolTests.cs` (new)
+- `tests/DataverseDocAgent.Tests/DataverseToolFactoryTests.cs` (modified — renamed test asserts 5 named tools in canonical order)
+- `tests/DataverseDocAgent.Tests/PromptBuilderTests.cs` (modified — 5th tool + `applicationUsers` key + verbatim-passthrough rule)
+- `tests/DataverseDocAgent.Tests/DocxBuilderTests.cs` (modified — 4 Section-5 branches + `BuildSampleModel` + empty-environment fixtures updated for required init)
+- `tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs` (modified — missing-key defence + null-entry filter tests)
+- `docs/prd.md` (modified — §5.4 `SystemUser | Read | ... | Never` row added per Dev Notes option 1)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` (modified — story 3-7 → review)
+- `_bmad-output/implementation-artifacts/story-3.7-application-user-inventory.md` (modified — task checkboxes, Dev Agent Record, status)
+
+### Change Log
+
+| Date       | Change                                                                       |
+|------------|------------------------------------------------------------------------------|
+| 2026-05-14 | Story 3.7 implemented — `GetApplicationUsersTool` + Section 5 (Application Users — Integration Signals); 247 tests pass. PRD §5.4 SystemUser row added; SecurityCheckService alignment deferred per handoff cap. |

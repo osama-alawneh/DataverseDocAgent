@@ -1,4 +1,5 @@
 // F-013 — FR-013 — Structured input to the .docx builder (Story 3.5)
+// F-055 — FR-050 — Top-level ApplicationUsers slot (Story 3.7)
 namespace DataverseDocAgent.Api.Documents;
 
 /// <summary>
@@ -13,6 +14,12 @@ public sealed class GeneratedDocumentModel
     public required IReadOnlyList<TableInfo>               Tables        { get; init; }
     public required IReadOnlyDictionary<string, IReadOnlyList<FieldInfo>>        Fields        { get; init; }
     public required IReadOnlyDictionary<string, IReadOnlyList<RelationshipInfo>> Relationships { get; init; }
+
+    // Story 3.7 — F-055 / FR-050. `required` so a future refactor cannot
+    // silently bypass the GetApplicationUsersTool result. Peer to Tables /
+    // Fields / Relationships (NOT nested under Summary) so the renderer can
+    // emit a top-level Section 5 without reaching into the executive summary.
+    public required IReadOnlyList<ApplicationUserInfo> ApplicationUsers { get; init; }
 }
 
 public sealed class ExecutiveSummary
@@ -59,4 +66,17 @@ public sealed class RelationshipInfo
     public          string? RelatedEntity    { get; init; }
     public          string? CascadeDelete    { get; init; }
     public          string? BusinessMeaning  { get; init; }
+}
+
+// Story 3.7 — F-055 / FR-050. Snapshot of one application (non-human integration)
+// user as surfaced by `get_application_users`. Roles is initialised so a missing
+// JSON key deserialises to an empty list rather than null; the renderer treats
+// empty roles as "(no roles assigned)" but treats the single-element sentinel
+// "(role lookup unavailable)" verbatim per AC-4.
+public sealed class ApplicationUserInfo
+{
+    public          string?               DisplayName   { get; init; }
+    public          string?               ApplicationId { get; init; }
+    public          string?               Email         { get; init; }
+    public          IReadOnlyList<string> Roles         { get; init; } = Array.Empty<string>();
 }

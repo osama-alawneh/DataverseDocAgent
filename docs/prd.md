@@ -412,6 +412,7 @@ Published to customers before they connect their first environment. Goal: a lock
 | SystemForm | Read | Read form definitions for JavaScript registration map | Never |
 | SavedQuery (View) | Read | Read view definitions for field impact analysis. Privilege name is `prvReadQuery` — Dataverse drops the "Saved" prefix on the privilege while keeping it on the entity | Never |
 | Organization | Read | Read basic environment metadata for report header | Never |
+| SystemUser | Read | List application users for integration signal detection (FR-050) — surfaces non-human integration principals along with their assigned roles | Never |
 
 > **Note on SharePoint baseline privileges:** In environments with SharePoint Document Management Integration enabled, Dataverse auto-grants `prvCreateSharePointData`, `prvReadSharePointData`, `prvWriteSharePointData`, and `prvReadSharePointDocument` to every security role and refuses manual removal. The permission checker treats these as harmless baseline and does not surface them as `extra[]`. The tool never reads or writes SharePoint entities.
 

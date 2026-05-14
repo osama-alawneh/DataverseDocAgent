@@ -6,7 +6,7 @@ namespace DataverseDocAgent.Tests;
 public class PromptBuilderTests
 {
     [Fact]
-    public void BuildMode1Prompt_MentionsAllFourMode1Tools_AndForbidsCodeFences()
+    public void BuildMode1Prompt_MentionsAllFiveMode1Tools_AndForbidsCodeFences()
     {
         var prompt = PromptBuilder.BuildMode1Prompt();
 
@@ -16,6 +16,8 @@ public class PromptBuilderTests
         Assert.Contains("list_custom_tables",        prompt);
         Assert.Contains("get_table_fields",          prompt);
         Assert.Contains("get_relationships",         prompt);
+        // Story 3.7 — F-055 / FR-050. Fifth Mode 1 tool.
+        Assert.Contains("get_application_users",     prompt);
 
         Assert.Contains("JSON", prompt);
         Assert.Contains("no markdown code fences", prompt);
@@ -29,5 +31,18 @@ public class PromptBuilderTests
         // that instruction against future prompt edits.
         var prompt = PromptBuilder.BuildMode1Prompt();
         Assert.Contains("Do NOT invent a `complexityRating`", prompt);
+    }
+
+    [Fact]
+    public void BuildMode1Prompt_DeclaresApplicationUsersOutputKey_AndPassthroughRule()
+    {
+        // Story 3.7 AC-7 — Claude's JSON shape must gain a top-level
+        // `applicationUsers` key alongside the existing organisation / tables /
+        // fields / relationships / keyObservations keys, and the prompt must
+        // explicitly forbid redacting or summarising role names so the renderer
+        // can surface the verbatim role list (FR-050).
+        var prompt = PromptBuilder.BuildMode1Prompt();
+        Assert.Contains("applicationUsers", prompt);
+        Assert.Contains("Pass the role array through verbatim", prompt);
     }
 }

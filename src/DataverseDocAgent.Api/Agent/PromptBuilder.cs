@@ -30,6 +30,8 @@ public static class PromptBuilder
              with that table's logical name to retrieve its custom attributes.
           4. For each custom table returned in step 2, call `get_relationships`
              with that table's logical name to retrieve its custom relationships.
+          5. Call `get_application_users` once to retrieve every application user
+             (non-human integration principal) registered in the environment.
 
         Once all tool calls are complete, return your FINAL response as a single
         JSON object only — no surrounding text and no markdown code fences. The
@@ -61,6 +63,10 @@ public static class PromptBuilder
                 "businessMeaning": "<short AI-inferred description|null>" }
             ]
           },
+          "applicationUsers": [
+            { "displayName": "<string|null>", "applicationId": "<string|null>",
+              "email": "<string|null>", "roles": ["<role display name>"] }
+          ],
           "keyObservations": [
             "<3 to 5 plain-English observations about the environment>"
           ]
@@ -77,5 +83,8 @@ public static class PromptBuilder
             return.
           - If a tool returns an `error` field, skip that table for the affected
             section rather than fabricating data.
+          - Pass the role array through verbatim — do not redact or summarise role
+            names returned by `get_application_users`. If the tool reports the
+            sentinel "(role lookup unavailable)" for a user, preserve it exactly.
         """;
 }

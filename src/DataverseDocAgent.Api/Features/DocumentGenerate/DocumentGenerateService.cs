@@ -186,6 +186,16 @@ public sealed class DocumentGenerateService : IGenerationPipeline
         // blob and the analyzer cost is observable on the per-job log line.
         var prefixSummary = PrefixAnalyzer.Analyze(tables);
 
+        // Story 3.7 — F-055 / FR-050. Defence-in-depth: a Claude response that
+        // drops the `applicationUsers` key (e.g. Mode 1 prompt drift, or a stale
+        // model that still emits the four-key Story 3.5 shape) parses as an
+        // empty list rather than failing AI_ERROR. Null entries inside the
+        // array are also filtered out at the parse boundary — mirrors the
+        // Story 3.6 P2 null-entry filter for Tables.
+        var applicationUsers = (IReadOnlyList<ApplicationUserInfo>?)(
+            parsed.ApplicationUsers?.Where(u => u is not null).ToList())
+            ?? Array.Empty<ApplicationUserInfo>();
+
         var model = new GeneratedDocumentModel
         {
             Summary = new ExecutiveSummary
@@ -202,9 +212,10 @@ public sealed class DocumentGenerateService : IGenerationPipeline
                 KeyObservations   = (IReadOnlyList<string>?)parsed.KeyObservations ?? Array.Empty<string>(),
                 PrefixSummary     = prefixSummary,
             },
-            Tables        = tables,
-            Fields        = CoerceDict(parsed.Fields),
-            Relationships = CoerceDict(parsed.Relationships),
+            Tables           = tables,
+            Fields           = CoerceDict(parsed.Fields),
+            Relationships    = CoerceDict(parsed.Relationships),
+            ApplicationUsers = applicationUsers,
         };
 
         // ── Render + store ────────────────────────────────────────────────────
@@ -223,11 +234,16 @@ public sealed class DocumentGenerateService : IGenerationPipeline
 
     internal sealed class AgentJsonModel
     {
-        public OrganisationDto?                              Organisation    { get; set; }
-        public List<TableInfo>?                              Tables          { get; set; }
-        public Dictionary<string, List<FieldInfo>?>?         Fields          { get; set; }
-        public Dictionary<string, List<RelationshipInfo>?>?  Relationships   { get; set; }
-        public List<string>?                                 KeyObservations { get; set; }
+        public OrganisationDto?                              Organisation     { get; set; }
+        public List<TableInfo>?                              Tables           { get; set; }
+        public Dictionary<string, List<FieldInfo>?>?         Fields           { get; set; }
+        public Dictionary<string, List<RelationshipInfo>?>?  Relationships    { get; set; }
+        public List<string>?                                 KeyObservations  { get; set; }
+        // Story 3.7 — F-055 / FR-050. Optional in the DTO so a Claude response
+        // that omits the key (e.g. backwards-compatible four-key shape from
+        // Story 3.5) deserialises cleanly and the safe-coalesce in
+        // RunPipelineAsync renders the empty Section 5.
+        public List<ApplicationUserInfo>?                    ApplicationUsers { get; set; }
     }
 
     internal sealed class OrganisationDto

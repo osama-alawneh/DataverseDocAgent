@@ -8,15 +8,18 @@ namespace DataverseDocAgent.Tests;
 public class DataverseToolFactoryTests
 {
     [Fact]
-    public void CreateMode1Tools_ReturnsExactlyFourNamedTools()
+    public void CreateMode1Tools_ReturnsExactlyFiveNamedTools()
     {
         var svc = new Mock<IOrganizationService>().Object;
         var tools = DataverseToolFactory.CreateMode1Tools(svc);
 
         var names = tools.Select(t => t.Name).ToArray();
-        // Exact-set assertion: a regression that swaps or drops a tool changes Mode 1's
-        // capability surface. Story 3.5 adds get_organisation_metadata as the 4th tool
-        // that drives the executive-summary section of the generated .docx (FR-011).
+        // Exact-ordered assertion: a regression that swaps, drops, or reorders
+        // a tool changes Mode 1's capability surface. Story 3.5 added
+        // get_organisation_metadata as the 4th tool. Story 3.7 adds
+        // get_application_users as the 5th tool (FR-050) — the trailing slot
+        // is pinned here so a future addition cannot silently shift the
+        // application-users tool out of its documented position.
         Assert.Equal(
             new[]
             {
@@ -24,6 +27,7 @@ public class DataverseToolFactoryTests
                 "get_table_fields",
                 "get_relationships",
                 "get_organisation_metadata",
+                "get_application_users",
             },
             names);
     }

@@ -1,6 +1,7 @@
 // F-013 — Story 3.5 DocxBuilder tests — section presence + structural validity
 // F-047 — Story 3.6 adds three AC-5 narrative tests + empty-environment guard for
 //         the Publisher Prefix Summary sub-section.
+// F-055 — Story 3.7 adds Section 5 (Application Users) populated + empty tests.
 using DataverseDocAgent.Api.Documents;
 using DataverseDocAgent.Api.Features.DocumentGenerate;
 using DocumentFormat.OpenXml.Packaging;
@@ -72,9 +73,10 @@ public class DocxBuilderTests
                 KeyObservations   = Array.Empty<string>(),
                 PrefixSummary     = EmptyPrefixSummary(),
             },
-            Tables        = Array.Empty<TableInfo>(),
-            Fields        = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
-            Relationships = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
+            Tables           = Array.Empty<TableInfo>(),
+            Fields           = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
+            Relationships    = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
+            ApplicationUsers = Array.Empty<ApplicationUserInfo>(),
         };
 
         var bytes = DocxBuilder.Build(model);
@@ -88,6 +90,10 @@ public class DocxBuilderTests
         // Story 3.6 AC-7 — for an empty environment the section header is omitted.
         var text = string.Join("\n", body.Descendants<Text>().Select(t => t.Text ?? string.Empty));
         Assert.DoesNotContain("Publisher Prefix Summary", text);
+        // Story 3.7 AC-10 — Section 5 is suppressed only when both tables AND
+        // application users are empty. For this empty-environment fixture the
+        // section header must NOT render.
+        Assert.DoesNotContain("5. Application Users (Integration Signals)", text);
     }
 
     [Fact]
@@ -110,9 +116,10 @@ public class DocxBuilderTests
                     .ToArray(),
                 PrefixSummary     = EmptyPrefixSummary(),
             },
-            Tables        = Array.Empty<TableInfo>(),
-            Fields        = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
-            Relationships = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
+            Tables           = Array.Empty<TableInfo>(),
+            Fields           = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
+            Relationships    = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
+            ApplicationUsers = Array.Empty<ApplicationUserInfo>(),
         };
 
         var bytes = DocxBuilder.Build(model);
@@ -287,6 +294,155 @@ public class DocxBuilderTests
         Assert.DoesNotContain("(1 components)", text);
     }
 
+    // ─── Story 3.7 — Section 5 Application Users ─────────────────────────────
+
+    [Fact]
+    public void Build_ApplicationUsersSection_Populated_RendersHeadingProseAndTable()
+    {
+        var users = new[]
+        {
+            new ApplicationUserInfo
+            {
+                DisplayName   = "Integration Sync",
+                ApplicationId = "11111111-1111-1111-1111-111111111111",
+                Email         = "sync@contoso.onmicrosoft.com",
+                Roles         = new[] { "Reader", "Custom Writer" },
+            },
+            new ApplicationUserInfo
+            {
+                DisplayName   = "Logic Apps Connector",
+                ApplicationId = "22222222-2222-2222-2222-222222222222",
+                Email         = null,
+                Roles         = new[]
+                {
+                    GetApplicationUsersTool_RoleLookupSentinel,
+                },
+            },
+        };
+        var model = BuildModelWithApplicationUsers(users, tableCount: 4);
+
+        var text = RenderText(model);
+
+        // AC-9 — heading + literal FR-050 prose paragraph.
+        Assert.Contains("5. Application Users (Integration Signals)", text);
+        Assert.Contains(
+            "Application users are typically used by external integrations. The following "
+            + "application users are registered and may be writing to tables in this environment.",
+            text);
+        // AC-9 — three-column header.
+        Assert.Contains("Display Name", text);
+        Assert.Contains("Application ID", text);
+        Assert.Contains("Roles", text);
+        // Per-user rows.
+        Assert.Contains("Integration Sync",                                text);
+        Assert.Contains("11111111-1111-1111-1111-111111111111",            text);
+        Assert.Contains("Reader, Custom Writer",                           text);
+        Assert.Contains("Logic Apps Connector",                            text);
+        Assert.Contains("22222222-2222-2222-2222-222222222222",            text);
+        // Sentinel preserved verbatim per AC-4 / AC-9.
+        Assert.Contains(GetApplicationUsersTool_RoleLookupSentinel,        text);
+        // Empty list fallback prose must NOT be emitted when users exist.
+        Assert.DoesNotContain("No application users registered in this environment.", text);
+    }
+
+    [Fact]
+    public void Build_ApplicationUsersSection_EmptyList_PopulatedEnvironment_RendersHeadingAndFallbackProse()
+    {
+        // AC-10 — Section 5 must still render its heading + literal prose +
+        // the "No application users registered" sentence whenever the document
+        // is otherwise non-empty (Tables.Count > 0). The breakdown table is
+        // omitted in this branch.
+        var model = BuildModelWithApplicationUsers(
+            users: Array.Empty<ApplicationUserInfo>(),
+            tableCount: 3);
+
+        var text = RenderText(model);
+
+        Assert.Contains("5. Application Users (Integration Signals)",       text);
+        Assert.Contains(
+            "Application users are typically used by external integrations. The following "
+            + "application users are registered and may be writing to tables in this environment.",
+            text);
+        Assert.Contains("No application users registered in this environment.", text);
+        // No table headers when the user list is empty.
+        Assert.DoesNotContain("Display Name", text);
+        Assert.DoesNotContain("Application ID", text);
+    }
+
+    [Fact]
+    public void Build_ApplicationUsersSection_EmptyRolesList_RendersNoRolesAssignedLiteral()
+    {
+        // AC-9 final clause — an empty roles array must render the literal
+        // "(no roles assigned)" so the cell is never blank. Distinct from the
+        // AC-4 sentinel which means the lookup itself failed.
+        var users = new[]
+        {
+            new ApplicationUserInfo
+            {
+                DisplayName   = "Bare User",
+                ApplicationId = "33333333-3333-3333-3333-333333333333",
+                Email         = null,
+                Roles         = Array.Empty<string>(),
+            },
+        };
+
+        var text = RenderText(BuildModelWithApplicationUsers(users, tableCount: 1));
+
+        Assert.Contains("Bare User",          text);
+        Assert.Contains("(no roles assigned)", text);
+        Assert.DoesNotContain(GetApplicationUsersTool_RoleLookupSentinel, text);
+    }
+
+    [Fact]
+    public void Build_ApplicationUsersSection_FullyEmptyEnvironment_OmitsSectionHeader()
+    {
+        // AC-10 — when Tables.Count == 0 AND ApplicationUsers.Count == 0 the
+        // section heading must NOT render. This is the only branch where the
+        // header is suppressed.
+        var model = BuildModelWithApplicationUsers(
+            users: Array.Empty<ApplicationUserInfo>(),
+            tableCount: 0);
+
+        var text = RenderText(model);
+
+        Assert.DoesNotContain("5. Application Users (Integration Signals)", text);
+        Assert.DoesNotContain(
+            "Application users are typically used by external integrations.",
+            text);
+    }
+
+    private const string GetApplicationUsersTool_RoleLookupSentinel = "(role lookup unavailable)";
+
+    private static GeneratedDocumentModel BuildModelWithApplicationUsers(
+        IReadOnlyList<ApplicationUserInfo> users,
+        int tableCount)
+    {
+        // Section-5 visibility (AC-10) is gated on the model's Tables
+        // collection size, not the summary's TableCount counter — populate
+        // the collection so the fixture exercises the "tables present" branch.
+        var tables = Enumerable.Range(0, tableCount)
+            .Select(i => new TableInfo { LogicalName = $"fake_table_{i}" })
+            .ToArray();
+        return new GeneratedDocumentModel
+        {
+            Summary = new ExecutiveSummary
+            {
+                EnvironmentName   = "App Users Test Org",
+                ScanDate          = new DateTime(2026, 5, 14, 12, 0, 0, DateTimeKind.Utc),
+                ComplexityRating  = "Medium",
+                TableCount        = tableCount,
+                FieldCount        = 0,
+                RelationshipCount = 0,
+                KeyObservations   = Array.Empty<string>(),
+                PrefixSummary     = EmptyPrefixSummary(),
+            },
+            Tables           = tables,
+            Fields           = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
+            Relationships    = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
+            ApplicationUsers = users,
+        };
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     private static string RenderText(GeneratedDocumentModel model)
@@ -312,9 +468,10 @@ public class DocxBuilderTests
                 KeyObservations   = Array.Empty<string>(),
                 PrefixSummary     = prefix,
             },
-            Tables        = Array.Empty<TableInfo>(),
-            Fields        = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
-            Relationships = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
+            Tables           = Array.Empty<TableInfo>(),
+            Fields           = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
+            Relationships    = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
+            ApplicationUsers = Array.Empty<ApplicationUserInfo>(),
         };
 
     private static PublisherPrefixSummary EmptyPrefixSummary() => new()
@@ -389,5 +546,6 @@ public class DocxBuilderTests
                 },
             },
         },
+        ApplicationUsers = Array.Empty<ApplicationUserInfo>(),
     };
 }
