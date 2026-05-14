@@ -211,6 +211,268 @@ public class GetApplicationUsersToolTests
             () => tool.ExecuteAsync(EmptyInput(), cts.Token));
     }
 
+    // ── Code-review patches: broadened fault catches + edge guards ──────────
+
+    // P10 — per-user role-lookup fault sentinel must surface for ALL fault
+    // types in the catch filter, not only FaultException.
+    public static IEnumerable<object[]> PerUserFaultTypes => new[]
+    {
+        new object[] { new FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { Message = "fault" }) },
+        new object[] { new TimeoutException("timeout") },
+        new object[] { new CommunicationException("wcf channel fault") },
+        new object[] { new System.Net.Http.HttpRequestException("dns") },
+        // P3 — broadened catch must ALSO surface sentinel for unexpected
+        // exception types (InvalidOperationException, ArgumentException) so
+        // per-user isolation holds against unknown SDK shapes.
+        new object[] { new InvalidOperationException("unexpected") },
+        new object[] { new ArgumentException("unexpected") },
+    };
+
+    [Theory]
+    [MemberData(nameof(PerUserFaultTypes))]
+    public async Task ExecuteAsync_PerUserRoleLookupFault_AllFaultTypes_SurfaceSentinel(Exception fault)
+    {
+        var userId = Guid.NewGuid();
+        var appId  = Guid.NewGuid();
+        var systemUsers = new EntityCollection
+        {
+            Entities = { BuildSystemUserEntity(userId, "Faulty App", appId, null) },
+        };
+
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsSystemUserQuery(q))))
+           .Returns(systemUsers);
+        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsRoleQueryForUser(q, userId))))
+           .Throws(fault);
+
+        var tool = new GetApplicationUsersTool(svc.Object);
+        var json = await tool.ExecuteAsync(EmptyInput());
+
+        var users    = JsonDocument.Parse(json).RootElement.GetProperty("applicationUsers");
+        Assert.Equal(1, users.GetArrayLength());
+        var roles = users[0].GetProperty("roles").EnumerateArray().Select(e => e.GetString()).ToArray();
+        Assert.Single(roles);
+        Assert.Equal(GetApplicationUsersTool.RoleLookupUnavailableSentinel, roles[0]);
+    }
+
+    // P11 — outer (initial systemuser query) fault must surface the structured
+    // error for ALL fault types, not only FaultException + Timeout.
+    public static IEnumerable<object[]> OuterFaultTypes => new[]
+    {
+        new object[] { new FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { Message = "fault" }) },
+        new object[] { new TimeoutException("timeout") },
+        new object[] { new CommunicationException("wcf channel fault") },
+        new object[] { new System.Net.Http.HttpRequestException("dns") },
+        new object[] { new InvalidOperationException("unexpected") },
+    };
+
+    [Theory]
+    [MemberData(nameof(OuterFaultTypes))]
+    public async Task ExecuteAsync_OuterFault_AllFaultTypes_ReturnStructuredError(Exception fault)
+    {
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.RetrieveMultiple(It.IsAny<QueryBase>())).Throws(fault);
+
+        var tool = new GetApplicationUsersTool(svc.Object);
+        var json = await tool.ExecuteAsync(EmptyInput());
+
+        var root = JsonDocument.Parse(json).RootElement;
+        Assert.True(root.TryGetProperty("error", out var err));
+        Assert.Equal("Failed to list application users", err.GetString());
+    }
+
+    // P12 — null EntityCollection on the initial systemuser query is the
+    // documented `result?.Entities is null` guard; pin it against regression.
+    [Fact]
+    public async Task ExecuteAsync_RetrieveMultipleReturnsNull_ReturnsEmptyArray()
+    {
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.RetrieveMultiple(It.IsAny<QueryBase>()))
+           .Returns((EntityCollection)null!);
+
+        var tool = new GetApplicationUsersTool(svc.Object);
+        var json = await tool.ExecuteAsync(EmptyInput());
+
+        var root = JsonDocument.Parse(json).RootElement;
+        Assert.True(root.TryGetProperty("applicationUsers", out var users));
+        Assert.Equal(0, users.GetArrayLength());
+        Assert.False(root.TryGetProperty("error", out _));
+    }
+
+    // P1 — null Entity element inside the EntityCollection must be skipped,
+    // not NRE'd. Both the outer user list and the inner role list paths are
+    // covered.
+    [Fact]
+    public async Task ExecuteAsync_NullUserEntityInCollection_IsSilentlySkipped()
+    {
+        var goodId = Guid.NewGuid();
+        var appId  = Guid.NewGuid();
+        var systemUsers = new EntityCollection();
+        // Inject null first, then a real user. The null must not abort the
+        // enumeration or leak as the error contract.
+        systemUsers.Entities.Add(null!);
+        systemUsers.Entities.Add(BuildSystemUserEntity(goodId, "Survivor App", appId, null));
+
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsSystemUserQuery(q))))
+           .Returns(systemUsers);
+        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsRoleQueryForUser(q, goodId))))
+           .Returns(BuildRoleCollection("Reader"));
+
+        var tool = new GetApplicationUsersTool(svc.Object);
+        var json = await tool.ExecuteAsync(EmptyInput());
+
+        var users = JsonDocument.Parse(json).RootElement.GetProperty("applicationUsers");
+        Assert.Equal(1, users.GetArrayLength());
+        Assert.Equal("Survivor App", users[0].GetProperty("displayName").GetString());
+    }
+
+    // P5 — whitespace-only role name attribute is filtered at the tool
+    // boundary so the renderer never sees " " entries.
+    [Fact]
+    public async Task ExecuteAsync_RoleEntityWhitespaceName_IsDroppedFromRolesArray()
+    {
+        var userId = Guid.NewGuid();
+        var appId  = Guid.NewGuid();
+        var systemUsers = new EntityCollection
+        {
+            Entities = { BuildSystemUserEntity(userId, "Whitespace App", appId, null) },
+        };
+
+        var roleResult = new EntityCollection();
+        var whitespaceRole = new Entity("role") { Id = Guid.NewGuid() };
+        whitespaceRole["name"] = "   ";
+        var realRole = new Entity("role") { Id = Guid.NewGuid() };
+        realRole["name"] = "Reader";
+        roleResult.Entities.Add(whitespaceRole);
+        roleResult.Entities.Add(realRole);
+
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsSystemUserQuery(q))))
+           .Returns(systemUsers);
+        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsRoleQueryForUser(q, userId))))
+           .Returns(roleResult);
+
+        var tool = new GetApplicationUsersTool(svc.Object);
+        var json = await tool.ExecuteAsync(EmptyInput());
+
+        var roles = JsonDocument.Parse(json).RootElement
+            .GetProperty("applicationUsers")[0]
+            .GetProperty("roles")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToArray();
+        Assert.Single(roles);
+        Assert.Equal("Reader", roles[0]);
+    }
+
+    // P4 — applicationid surfaces in three SDK shapes (Guid / string /
+    // EntityReference); pin the round-trip for each.
+    [Fact]
+    public async Task ExecuteAsync_ApplicationIdAsString_IsRoundTripped()
+    {
+        var userId = Guid.NewGuid();
+        const string raw = "ABCDEF12-1234-5678-9012-3456789ABCDE";
+        var e = new Entity("systemuser") { Id = userId };
+        e["systemuserid"]  = userId;
+        e["fullname"]      = "String App";
+        e["applicationid"] = raw;
+
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsSystemUserQuery(q))))
+           .Returns(new EntityCollection { Entities = { e } });
+        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsRoleQueryForUser(q, userId))))
+           .Returns(BuildRoleCollection("Reader"));
+
+        var tool = new GetApplicationUsersTool(svc.Object);
+        var json = await tool.ExecuteAsync(EmptyInput());
+
+        var user = JsonDocument.Parse(json).RootElement.GetProperty("applicationUsers")[0];
+        Assert.Equal(raw, user.GetProperty("applicationId").GetString());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ApplicationIdAsEntityReference_UnwrapsToGuid()
+    {
+        var userId = Guid.NewGuid();
+        var inner  = Guid.NewGuid();
+        var e = new Entity("systemuser") { Id = userId };
+        e["systemuserid"]  = userId;
+        e["fullname"]      = "Ref App";
+        e["applicationid"] = new EntityReference("application", inner);
+
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsSystemUserQuery(q))))
+           .Returns(new EntityCollection { Entities = { e } });
+        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsRoleQueryForUser(q, userId))))
+           .Returns(BuildRoleCollection("Reader"));
+
+        var tool = new GetApplicationUsersTool(svc.Object);
+        var json = await tool.ExecuteAsync(EmptyInput());
+
+        var user = JsonDocument.Parse(json).RootElement.GetProperty("applicationUsers")[0];
+        Assert.Equal(inner.ToString(), user.GetProperty("applicationId").GetString());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ApplicationIdAsEmptyGuid_IsDroppedFromJson()
+    {
+        var userId = Guid.NewGuid();
+        var e = new Entity("systemuser") { Id = userId };
+        e["systemuserid"]  = userId;
+        e["fullname"]      = "Zero App";
+        e["applicationid"] = Guid.Empty;
+
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsSystemUserQuery(q))))
+           .Returns(new EntityCollection { Entities = { e } });
+        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsRoleQueryForUser(q, userId))))
+           .Returns(BuildRoleCollection("Reader"));
+
+        var tool = new GetApplicationUsersTool(svc.Object);
+        var json = await tool.ExecuteAsync(EmptyInput());
+
+        var user = JsonDocument.Parse(json).RootElement.GetProperty("applicationUsers")[0];
+        // Guid.Empty collapses to null and the WhenWritingNull policy drops
+        // the key from the JSON.
+        Assert.False(user.TryGetProperty("applicationId", out _));
+    }
+
+    // P13 — mid-iteration cancellation: token cancels between the initial
+    // RetrieveMultiple returning users and the first per-user role lookup.
+    [Fact]
+    public async Task ExecuteAsync_CancellationBetweenUsers_PropagatesOCE()
+    {
+        var userIdA = Guid.NewGuid();
+        var userIdB = Guid.NewGuid();
+        var systemUsers = new EntityCollection
+        {
+            Entities =
+            {
+                BuildSystemUserEntity(userIdA, "First",  Guid.NewGuid(), null),
+                BuildSystemUserEntity(userIdB, "Second", Guid.NewGuid(), null),
+            },
+        };
+
+        using var cts = new CancellationTokenSource();
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsSystemUserQuery(q))))
+           .Returns(systemUsers);
+        // First user's role query returns successfully but cancels the token
+        // before the foreach moves to the second user — the next loop
+        // iteration's ThrowIfCancellationRequested must short-circuit.
+        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsRoleQueryForUser(q, userIdA))))
+           .Callback(() => cts.Cancel())
+           .Returns(BuildRoleCollection("Reader"));
+
+        var tool = new GetApplicationUsersTool(svc.Object);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => tool.ExecuteAsync(EmptyInput(), cts.Token));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static JsonElement EmptyInput() =>

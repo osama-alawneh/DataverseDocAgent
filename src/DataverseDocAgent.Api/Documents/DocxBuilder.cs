@@ -2,6 +2,7 @@
 // F-047 — FR-042 — Publisher Prefix Summary sub-section (Story 3.6)
 // F-055 — FR-050 — Section 5 "Application Users (Integration Signals)" (Story 3.7)
 using System.Text;
+using DataverseDocAgent.Api.Agent.Tools;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -11,7 +12,8 @@ namespace DataverseDocAgent.Api.Documents;
 /// <summary>
 /// Builds the Mode 1 .docx body from a <see cref="GeneratedDocumentModel"/>.
 /// Sections (per PRD §8.1): (1) Executive Summary, (2) Custom Tables,
-/// (3) Field Catalogue, (4) Relationship Map. Output is a fully-formed
+/// (3) Field Catalogue, (4) Relationship Map, (5) Application Users
+/// (Integration Signals — FR-050 / Story 3.7). Output is a fully-formed
 /// OpenXML package — the caller receives raw bytes, not a stream, because
 /// streams ownership across the storage layer is fragile.
 /// </summary>
@@ -284,18 +286,50 @@ public static class DocxBuilder
         // AC-9 — three-column table: Display Name | Application ID | Roles.
         // Empty role list renders the literal "(no roles assigned)" so the
         // cell is never blank; the sentinel "(role lookup unavailable)" from
-        // GetApplicationUsersTool is preserved verbatim because it survives
-        // the same join path.
+        // GetApplicationUsersTool is preserved verbatim. Story 3.7
+        // code-review P6 routes role-list rendering through a single helper
+        // so null/whitespace entries, duplicates, and the sentinel-mixed-
+        // with-real-roles case (Claude prompt drift) cannot produce
+        // misleading cells like "Reader, , Reader" or
+        // "(role lookup unavailable), Reader".
         var rows = applicationUsers.Select(u => new[]
         {
             u.DisplayName   ?? string.Empty,
             u.ApplicationId ?? string.Empty,
-            u.Roles is { Count: > 0 } ? string.Join(", ", u.Roles) : "(no roles assigned)",
+            FormatRolesCell(u.Roles),
         }).ToArray();
 
         body.AppendChild(BuildTable(
             new[] { "Display Name", "Application ID", "Roles" },
             rows));
+    }
+
+    internal static string FormatRolesCell(IReadOnlyList<string>? roles)
+    {
+        // Story 3.7 code-review P6 / P7.
+        // 1. Null / empty input → "(no roles assigned)".
+        // 2. If the role-lookup sentinel appears anywhere in the array,
+        //    render the sentinel ALONE (the lookup failed; mixing it with
+        //    other entries would be semantically meaningless and is the
+        //    Claude-fabrication failure mode the prompt rule tries to
+        //    prevent).
+        // 3. Otherwise: filter null / whitespace entries, dedupe (preserves
+        //    first-occurrence order), and join with ", ".
+        if (roles is null || roles.Count == 0) return "(no roles assigned)";
+
+        foreach (var role in roles)
+        {
+            if (string.Equals(role, GetApplicationUsersTool.RoleLookupUnavailableSentinel, StringComparison.Ordinal))
+                return GetApplicationUsersTool.RoleLookupUnavailableSentinel;
+        }
+
+        var cleaned = roles
+            .Where(r => !string.IsNullOrWhiteSpace(r))
+            .Select(r => r.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        return cleaned.Count == 0 ? "(no roles assigned)" : string.Join(", ", cleaned);
     }
 
     private static void AppendRelationshipMapSection(

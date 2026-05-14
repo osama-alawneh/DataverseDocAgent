@@ -2,6 +2,7 @@
 // F-047 — Story 3.6 adds three AC-5 narrative tests + empty-environment guard for
 //         the Publisher Prefix Summary sub-section.
 // F-055 — Story 3.7 adds Section 5 (Application Users) populated + empty tests.
+using DataverseDocAgent.Api.Agent.Tools;
 using DataverseDocAgent.Api.Documents;
 using DataverseDocAgent.Api.Features.DocumentGenerate;
 using DocumentFormat.OpenXml.Packaging;
@@ -315,7 +316,7 @@ public class DocxBuilderTests
                 Email         = null,
                 Roles         = new[]
                 {
-                    GetApplicationUsersTool_RoleLookupSentinel,
+                    GetApplicationUsersTool.RoleLookupUnavailableSentinel,
                 },
             },
         };
@@ -340,7 +341,7 @@ public class DocxBuilderTests
         Assert.Contains("Logic Apps Connector",                            text);
         Assert.Contains("22222222-2222-2222-2222-222222222222",            text);
         // Sentinel preserved verbatim per AC-4 / AC-9.
-        Assert.Contains(GetApplicationUsersTool_RoleLookupSentinel,        text);
+        Assert.Contains(GetApplicationUsersTool.RoleLookupUnavailableSentinel,        text);
         // Empty list fallback prose must NOT be emitted when users exist.
         Assert.DoesNotContain("No application users registered in this environment.", text);
     }
@@ -390,7 +391,106 @@ public class DocxBuilderTests
 
         Assert.Contains("Bare User",          text);
         Assert.Contains("(no roles assigned)", text);
-        Assert.DoesNotContain(GetApplicationUsersTool_RoleLookupSentinel, text);
+        Assert.DoesNotContain(GetApplicationUsersTool.RoleLookupUnavailableSentinel, text);
+    }
+
+    [Fact]
+    public void Build_ApplicationUsersSection_RolesContainNullsWhitespaceDuplicates_AreFilteredAndDeduped()
+    {
+        // Story 3.7 code-review P6 — a flaky Claude payload may emit null /
+        // empty / whitespace / duplicate role-string entries; the renderer
+        // cleans the cell so it reads "Reader, Custom Writer", not
+        // "Reader, , Reader, Custom Writer".
+        var users = new[]
+        {
+            new ApplicationUserInfo
+            {
+                DisplayName   = "Noisy Roles",
+                ApplicationId = "44444444-4444-4444-4444-444444444444",
+                Roles         = new string?[] { "Reader", null, "", "   ", "Reader", "  Custom Writer  " }!
+                    .Cast<string>().ToArray(),
+            },
+        };
+
+        var text = RenderText(BuildModelWithApplicationUsers(users, tableCount: 1));
+
+        Assert.Contains("Reader, Custom Writer", text);
+        Assert.DoesNotContain("Reader, ,", text);
+        Assert.DoesNotContain("Reader, Reader", text);
+    }
+
+    [Fact]
+    public void Build_ApplicationUsersSection_RolesArrayContainsSentinelMixedWithRealRoles_RendersSentinelAlone()
+    {
+        // Story 3.7 code-review P7 — Claude could fabricate a roles array
+        // that mixes the lookup-failed sentinel with real role names. The
+        // renderer must collapse to the sentinel alone — the lookup either
+        // succeeded or it did not; mixing the two states is meaningless.
+        var users = new[]
+        {
+            new ApplicationUserInfo
+            {
+                DisplayName   = "Confused Claude",
+                ApplicationId = "55555555-5555-5555-5555-555555555555",
+                Roles         = new[]
+                {
+                    GetApplicationUsersTool.RoleLookupUnavailableSentinel,
+                    "Reader",
+                    "Custom Writer",
+                },
+            },
+        };
+
+        var text = RenderText(BuildModelWithApplicationUsers(users, tableCount: 1));
+
+        Assert.Contains(GetApplicationUsersTool.RoleLookupUnavailableSentinel, text);
+        // The real-role names from the mixed payload must NOT appear in the
+        // rendered cell — the sentinel collapses the row.
+        Assert.DoesNotContain("(role lookup unavailable), Reader", text);
+        Assert.DoesNotContain("(role lookup unavailable), Custom Writer", text);
+    }
+
+    [Fact]
+    public void Build_ApplicationUsersSection_NullRolesProperty_RendersNoRolesAssigned()
+    {
+        // Story 3.7 code-review P8 — a `"roles": null` JSON payload from a
+        // flaky Claude response deserialises to a null Roles slot
+        // (ApplicationUserInfo.Roles is nullable). The renderer must treat
+        // null exactly like an empty list — "(no roles assigned)".
+        var users = new[]
+        {
+            new ApplicationUserInfo
+            {
+                DisplayName   = "Null Roles",
+                ApplicationId = "66666666-6666-6666-6666-666666666666",
+                Roles         = null,
+            },
+        };
+
+        var text = RenderText(BuildModelWithApplicationUsers(users, tableCount: 1));
+
+        Assert.Contains("(no roles assigned)", text);
+    }
+
+    [Fact]
+    public void FormatRolesCell_IsExercisedDirectly_ForSpec_CoverageOfBranches()
+    {
+        // Direct exercise of the helper guarantees the sentinel-only,
+        // null-input, dedupe, and trim branches are pinned even if the
+        // higher-level render path stops touching them.
+        Assert.Equal("(no roles assigned)", DocxBuilder.FormatRolesCell(null));
+        Assert.Equal("(no roles assigned)", DocxBuilder.FormatRolesCell(Array.Empty<string>()));
+        Assert.Equal(
+            GetApplicationUsersTool.RoleLookupUnavailableSentinel,
+            DocxBuilder.FormatRolesCell(new[]
+            {
+                "Reader",
+                GetApplicationUsersTool.RoleLookupUnavailableSentinel,
+            }));
+        Assert.Equal("Reader, Writer",
+            DocxBuilder.FormatRolesCell(new[] { "Reader", "  Writer  ", "Reader" }));
+        Assert.Equal("(no roles assigned)",
+            DocxBuilder.FormatRolesCell(new string?[] { null, "", "   " }!.Cast<string>().ToArray()));
     }
 
     [Fact]
@@ -410,8 +510,6 @@ public class DocxBuilderTests
             "Application users are typically used by external integrations.",
             text);
     }
-
-    private const string GetApplicationUsersTool_RoleLookupSentinel = "(role lookup unavailable)";
 
     private static GeneratedDocumentModel BuildModelWithApplicationUsers(
         IReadOnlyList<ApplicationUserInfo> users,

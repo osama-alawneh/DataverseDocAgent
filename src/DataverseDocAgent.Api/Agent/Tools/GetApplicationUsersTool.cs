@@ -1,6 +1,4 @@
 // F-055 — FR-050 — Integration Signal Detection: App User Inventory (Story 3.7)
-using System.Net.Http;
-using System.ServiceModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Xrm.Sdk;
@@ -61,6 +59,13 @@ public sealed class GetApplicationUsersTool : IDataverseTool
             foreach (var user in users)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                // Story 3.7 code-review P1 — defensive null-entry guard. The
+                // SDK's `EntityCollection.Entities` is documented as non-null
+                // in practice but the contract is not enforced; a regression
+                // or odd SDK path could surface a null element and an outer
+                // NRE would otherwise convert into the "Failed to list…"
+                // contract for the whole environment.
+                if (user is null) continue;
                 dtos.Add(BuildDto(user, cancellationToken));
             }
             return Task.FromResult(JsonSerializer.Serialize(
@@ -72,14 +77,18 @@ public sealed class GetApplicationUsersTool : IDataverseTool
             // otherwise the orchestrator's cancellation contract is silently broken.
             throw;
         }
-        catch (Exception ex) when (ex is FaultException<OrganizationServiceFault>
-                                       or TimeoutException
-                                       or CommunicationException
-                                       or HttpRequestException)
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
-            // NFR-007 / sibling-tool contract — never let raw SDK fault text reach
-            // Claude. Structured JSON keeps the agent loop alive and lets the
-            // orchestrator continue with the rest of the Mode 1 plan.
+            // Story 3.7 code-review P2 — sibling-tool contract demands the
+            // agent loop receive a tool result rather than an exception for
+            // ANY non-cancellation failure. The narrower FaultException /
+            // TimeoutException / CommunicationException / HttpRequestException
+            // filter was insufficient — an unexpected exception type (e.g.
+            // InvalidOperationException from a malformed Entity attribute
+            // cast, NRE from an unexpected SDK shape) would otherwise unwind
+            // into the orchestrator and crash Mode 1. NFR-007 holds: no
+            // exception details are echoed; the structured error is fixed
+            // text keyed on the tool name.
             return Task.FromResult(JsonSerializer.Serialize(
                 new { error = "Failed to list application users" }, s_jsonOptions));
         }
@@ -126,14 +135,22 @@ public sealed class GetApplicationUsersTool : IDataverseTool
     {
         // applicationid surfaces as either a string or a Guid depending on SDK
         // path; normalise to lowercase string with no braces so the JSON shape
-        // matches AC-3 verbatim.
+        // matches AC-3 verbatim. Story 3.7 code-review P4 — `Guid.Empty` is
+        // an all-zeros sentinel that does not identify a real Azure AD app
+        // registration; surface as null so the renderer cell is "(not
+        // available)" rather than a meaningless zero-Guid string.
+        // Code-review P4 — also handle EntityReference (some SDK paths
+        // surface this for Lookup-shaped Uniqueidentifier columns); without
+        // this arm the fallback ToString() would emit the runtime type name.
         if (!user.Attributes.TryGetValue("applicationid", out var raw) || raw is null)
             return null;
         return raw switch
         {
-            Guid g     => g.ToString(),
-            string s   => string.IsNullOrWhiteSpace(s) ? null : s,
-            _          => raw.ToString(),
+            Guid g when g == Guid.Empty => null,
+            Guid g                      => g.ToString(),
+            string s                    => string.IsNullOrWhiteSpace(s) ? null : s,
+            EntityReference er          => er.Id == Guid.Empty ? null : er.Id.ToString(),
+            _                           => null,
         };
     }
 
@@ -160,8 +177,15 @@ public sealed class GetApplicationUsersTool : IDataverseTool
             var names = new List<string>(result.Entities.Count);
             foreach (var entity in result.Entities)
             {
-                if (entity.GetAttributeValue<string?>("name") is { Length: > 0 } name)
-                    names.Add(name);
+                // Story 3.7 code-review P1 — defensive null-entity guard for
+                // the role result (mirrors the outer-loop guard).
+                if (entity is null) continue;
+                // Story 3.7 code-review P5 — whitespace-only role names are
+                // semantically equivalent to "no name" and would render as
+                // ", , " in the Word cell. Filter at the boundary.
+                var name = entity.GetAttributeValue<string?>("name");
+                if (!string.IsNullOrWhiteSpace(name))
+                    names.Add(name!);
             }
             return names;
         }
@@ -172,14 +196,18 @@ public sealed class GetApplicationUsersTool : IDataverseTool
             // below would silently mask a cancelling orchestrator.
             throw;
         }
-        catch (Exception ex) when (ex is FaultException<OrganizationServiceFault>
-                                       or TimeoutException
-                                       or CommunicationException
-                                       or HttpRequestException)
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
             // NFR-007 — never echo ex.Message; the SDK fault can carry
             // connection-string fragments. The sentinel array preserves the
             // renderer's "no roles" vs "lookup failed" distinction (AC-4).
+            // Story 3.7 code-review P3 — broadened from the narrow
+            // FaultException / Timeout / Communication / HttpRequest filter
+            // to ANY non-cancellation exception, so a single unexpected SDK
+            // shape (NRE, InvalidCast, ArgumentException) on one user does
+            // not abort enumeration of every remaining user — AC-4 mandates
+            // per-user isolation, not "isolation only for documented fault
+            // types."
             return new[] { RoleLookupUnavailableSentinel };
         }
     }

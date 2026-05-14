@@ -38,9 +38,10 @@ public class DataverseToolFactoryTests
         var svc = new Mock<IOrganizationService>().Object;
         var tools = DataverseToolFactory.CreateMode1Tools(svc);
 
-        // Each tool stores _service privately; assert via reflection that all three
-        // received the SAME instance — guards against future code that constructs
-        // tools with three different ServiceClients (re-auth-per-tool regression).
+        // Each tool stores _service privately; assert via reflection that all
+        // five (Story 3.7 added the 5th) received the SAME instance — guards
+        // against future code that constructs tools with separate
+        // ServiceClients (re-auth-per-tool regression).
         foreach (var tool in tools)
         {
             var serviceField = tool.GetType().GetField("_service",

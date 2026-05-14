@@ -69,14 +69,18 @@ public sealed class RelationshipInfo
 }
 
 // Story 3.7 — F-055 / FR-050. Snapshot of one application (non-human integration)
-// user as surfaced by `get_application_users`. Roles is initialised so a missing
-// JSON key deserialises to an empty list rather than null; the renderer treats
-// empty roles as "(no roles assigned)" but treats the single-element sentinel
-// "(role lookup unavailable)" verbatim per AC-4.
+// user as surfaced by `get_application_users`. Roles is initialised so a *missing*
+// JSON key deserialises to an empty list (System.Text.Json preserves the init
+// expression when the JSON omits the property), but Roles is declared nullable
+// because an *explicit* JSON `"roles": null` from a flaky Claude payload would
+// otherwise stomp the init expression with a real null on a non-nullable slot —
+// honest typing prevents a future caller from NRE'ing on `Roles.Count`. The
+// renderer (`DocxBuilder.FormatRolesCell`) accepts the nullable type and
+// emits "(no roles assigned)" for null/empty inputs.
 public sealed class ApplicationUserInfo
 {
-    public          string?               DisplayName   { get; init; }
-    public          string?               ApplicationId { get; init; }
-    public          string?               Email         { get; init; }
-    public          IReadOnlyList<string> Roles         { get; init; } = Array.Empty<string>();
+    public          string?                DisplayName   { get; init; }
+    public          string?                ApplicationId { get; init; }
+    public          string?                Email         { get; init; }
+    public          IReadOnlyList<string>? Roles         { get; init; } = Array.Empty<string>();
 }

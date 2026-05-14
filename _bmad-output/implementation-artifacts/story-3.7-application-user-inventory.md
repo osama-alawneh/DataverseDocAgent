@@ -1,6 +1,6 @@
 # Story 3.7: Application User Inventory
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -157,3 +157,49 @@ claude-opus-4-7
 | Date       | Change                                                                       |
 |------------|------------------------------------------------------------------------------|
 | 2026-05-14 | Story 3.7 implemented — `GetApplicationUsersTool` + Section 5 (Application Users — Integration Signals); 247 tests pass. PRD §5.4 SystemUser row added; SecurityCheckService alignment deferred per handoff cap. |
+| 2026-05-14 | Code review patches P1–P16 applied; 272 tests pass. Story → done.            |
+
+### Review Findings
+
+Adversarial review run on 2026-05-14 with three parallel subagents (Blind Hunter — diff-only, Edge Case Hunter — diff + read access, Acceptance Auditor — diff + spec + PRD). Severity rubric: HIGH = wrong output / crash / broken invariant; MED = edge case / coverage gap; LOW = nit. Patches applied below; everything else captured in `_bmad-output/implementation-artifacts/deferred-work.md` under the heading "Deferred from: code review of story-3.7 (2026-05-14)".
+
+#### Patches applied
+
+- [x] **P1** — `GetApplicationUsersTool.ExecuteAsync` defensively skips null `Entity` elements in both the outer user enumeration and the inner role-result enumeration. SDK contract does not enforce non-null entries; without the guard a flaky payload would NRE and the outer catch would convert the whole environment into the "Failed to list application users" error contract. (`src/DataverseDocAgent.Api/Agent/Tools/GetApplicationUsersTool.cs`)
+- [x] **P2** — `GetApplicationUsersTool.ExecuteAsync` outer catch broadened from the narrow `FaultException | TimeoutException | CommunicationException | HttpRequestException` filter to `catch (Exception) when (!cancellationToken.IsCancellationRequested)`. Sibling-tool contract demands the agent loop receive a tool result for ANY non-cancellation failure — an unexpected exception type (e.g. `InvalidOperationException` from a malformed `Entity` attribute cast) would otherwise crash the Mode 1 loop. NFR-007 still holds: no exception details are echoed; fixed error text only. (`src/DataverseDocAgent.Api/Agent/Tools/GetApplicationUsersTool.cs`)
+- [x] **P3** — `GetApplicationUsersTool.FetchRolesForUser` per-user catch broadened identically. AC-4's per-user isolation requirement applies to ANY exception type, not only the four originally listed — a single unknown SDK shape (NRE, InvalidCast, ArgumentException) on one user must not abort enumeration of every remaining user. (`src/DataverseDocAgent.Api/Agent/Tools/GetApplicationUsersTool.cs`)
+- [x] **P4** — `ExtractApplicationId` gains an `EntityReference` arm (some SDK paths surface `applicationid` this way) and treats `Guid.Empty` as null. Fallback returns null instead of `raw.ToString()` (which would emit `"Microsoft.Xrm.Sdk.EntityReference"` for unknown runtime types). (`src/DataverseDocAgent.Api/Agent/Tools/GetApplicationUsersTool.cs`)
+- [x] **P5** — `FetchRolesForUser` filters whitespace-only role names at the tool boundary via `!string.IsNullOrWhiteSpace(name)` instead of the laxer `is { Length: > 0 }`. Whitespace role rows would otherwise render as `, ,` in the Word cell. (`src/DataverseDocAgent.Api/Agent/Tools/GetApplicationUsersTool.cs`)
+- [x] **P6** — `DocxBuilder` Section 5 routes role-list rendering through a new internal helper `FormatRolesCell(IReadOnlyList<string>?)` that filters null / whitespace entries, dedupes (preserves first-occurrence order), and trims. Prevents misleading cells like `"Reader, , Reader"` from a flaky Claude payload. (`src/DataverseDocAgent.Api/Documents/DocxBuilder.cs`)
+- [x] **P7** — `FormatRolesCell` collapses a roles array containing the `(role lookup unavailable)` sentinel to the sentinel alone. Claude prompt drift could produce a mixed `["(role lookup unavailable)", "Reader"]` array; rendering that verbatim is semantically meaningless (either the lookup failed or it did not). Sentinel-only enforcement is locked by a dedicated DocxBuilder test. (`src/DataverseDocAgent.Api/Documents/DocxBuilder.cs`)
+- [x] **P8** — `ApplicationUserInfo.Roles` declared nullable (`IReadOnlyList<string>?`) to honestly type the System.Text.Json round-trip: a JSON `"roles": null` payload stomps the init expression, so a non-nullable slot was a future-NRE hazard. The renderer (`FormatRolesCell`) accepts the nullable type and emits `"(no roles assigned)"` for null/empty inputs. (`src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs`)
+- [x] **P9** — Tests now reference `GetApplicationUsersTool.RoleLookupUnavailableSentinel` directly instead of redeclaring the literal — defeats drift if the sentinel string is ever renamed. The duplicated test-local constant was removed. (`tests/DataverseDocAgent.Tests/DocxBuilderTests.cs`)
+- [x] **P10** — New `ExecuteAsync_PerUserRoleLookupFault_AllFaultTypes_SurfaceSentinel` theory covers all six fault types (FaultException, TimeoutException, CommunicationException, HttpRequestException, InvalidOperationException, ArgumentException). Locks the broadened P3 catch against regression. (`tests/DataverseDocAgent.Tests/GetApplicationUsersToolTests.cs`)
+- [x] **P11** — New `ExecuteAsync_OuterFault_AllFaultTypes_ReturnStructuredError` theory covers all five outer-fault types. Locks the broadened P2 catch. (`tests/DataverseDocAgent.Tests/GetApplicationUsersToolTests.cs`)
+- [x] **P12** — New `ExecuteAsync_RetrieveMultipleReturnsNull_ReturnsEmptyArray` pins the `result?.Entities is null` guard. (`tests/DataverseDocAgent.Tests/GetApplicationUsersToolTests.cs`)
+- [x] **P13** — New `ExecuteAsync_CancellationBetweenUsers_PropagatesOCE` test exercises mid-iteration token cancellation (one user's role query callback cancels the CTS; the next loop iteration must short-circuit). The pre-existing `_AlreadyCancelledToken_Throws` only covered pre-loop cancellation. (`tests/DataverseDocAgent.Tests/GetApplicationUsersToolTests.cs`)
+- [x] **P14** — Three new tests pin `ExtractApplicationId` branches: string input, EntityReference input, and `Guid.Empty` (collapses to null → JSON key dropped). (`tests/DataverseDocAgent.Tests/GetApplicationUsersToolTests.cs`)
+- [x] **P15** — `DataverseToolFactoryTests` reflection-binding test comment updated from "all three" to "all five" — pre-existing wording bug exposed by Story 3.7's 5-tool registration. (`tests/DataverseDocAgent.Tests/DataverseToolFactoryTests.cs`)
+- [x] **P16** — `DocxBuilder` class-level XML doc adds Section 5 to the section list, matching the per-method banner. (`src/DataverseDocAgent.Api/Documents/DocxBuilder.cs`)
+
+Tests after patches: 272 pass (was 247 after Phase A; +25 from coverage-gap patches and new branch tests).
+
+#### Deferred (see `deferred-work.md` — "Deferred from: code review of story-3.7 (2026-05-14)")
+
+- [x] **D-CR1** — `SecurityCheckService.RequiredPrivileges` alignment with PRD §5.4's new `SystemUser | Read` row (already deferred at Phase A dev time; carried into review deferral set).
+- [x] **D-CR2** — Duplicate `ApplicationUser` entries from Claude (same `applicationId`) — no dedupe at service-layer or renderer. Deferred until a real environment surfaces it.
+- [x] **D-CR3** — Non-deterministic role ordering across SDK retries — no `AddOrder` on the role query. Deferred until "regenerate-and-diff" workflow lands.
+- [x] **D-CR4** — Unicode / very-long display-name and email coverage gap in tests. Deferred until a real multi-language tenant surfaces a defect.
+- [x] **D-CR5** — Cross-section layout test (Tables.Count == 0 AND ApplicationUsers.Count > 0) — Sections 2/3/4 emit "no tables" placeholders, Section 5 emits the populated table. Combined-layout assertion deferred.
+- [x] **D-CR6** — Per-user `FetchApplicationUsers` cannot honour mid-call cancellation — synchronous SDK limitation already deferred at the family level (Story 3.4 / 3.5 deferred entries on `IOrganizationServiceAsync2`).
+- [x] **D-CR7** — Redundant `systemuserid` column in the initial `ColumnSet` (SDK populates `Entity.Id` automatically). Cosmetic; deferred.
+- [x] **D-CR8** — `SecurityCheckService.cs:13` comment still reads "All 12 required privileges" — paired with D-CR1 fix.
+
+#### Dismissed
+
+- AC-3 wording mixes Dataverse SDK attribute names (`fullname` / `applicationid` / `internalemailaddress`) with JSON keys, while implementation emits the Claude-output shape (`displayName` / `applicationId` / `email`) per AC-7. Deliberate per Completion Notes; resolved by AC-12 tests. No change.
+- `EntityCollection.Entities` cast to `IReadOnlyList<Entity>` — `DataCollection<T>` inherits from `Collection<T>` which implements `IReadOnlyList<T>` on .NET 6+. Safe.
+- `s_inputSchema` static `JsonElement` from literal JSON — `JsonSerializer.Deserialize<JsonElement>` on the valid literal cannot return null. No defect.
+- Heading numbering ("5. Application Users …") — story spec mandates the literal; document layout is consistent. No change.
+- `internalemailaddress` semantics for app users — Dataverse stores synthesised addresses; acceptable per AC-3. No change.
+- Tool's `ExecuteAsync` is sync-wrapped in `Task.FromResult` — matches Story 3.4 / 3.5 family pattern; sync-SDK limitation is already family-deferred.

@@ -124,6 +124,26 @@ public class DocumentGenerateServiceTests
         Assert.Null(parsed.ApplicationUsers);
     }
 
+    // Story 3.7 code-review P9 — a Claude response with a wrong-shape
+    // `applicationUsers` value (object / string instead of array) falls
+    // outside the AC-11 defence-in-depth contract: the missing-key path is
+    // explicitly tolerated, but a wrong-shape value still raises AI_ERROR
+    // (the safe-coalesce can only normalise NULL or array shapes — there is
+    // no semantically-correct fallback for "applicationUsers" returned as a
+    // string). Test pins the expected AI_ERROR behaviour so a future
+    // tolerant converter is an intentional design move rather than a silent
+    // regression of the parser strictness.
+    [Theory]
+    [InlineData("""{ "applicationUsers": "not-an-array" }""")]
+    [InlineData("""{ "applicationUsers": 42 }""")]
+    [InlineData("""{ "applicationUsers": { "displayName": "x" } }""")]
+    public void ParseAgentJson_WrongShapeApplicationUsersKey_RaisesAiError(string raw)
+    {
+        var ex = Assert.Throws<GenerationFailureException>(
+            () => DocumentGenerateService.ParseAgentJson(raw));
+        Assert.Equal(JobFailureCodes.AiError, ex.Code);
+    }
+
     // Story 3.7 — null entry inside the applicationUsers array (analogous to
     // the Story 3.6 P13 tables-null filter). The service strips nulls before
     // the renderer touches the list.
