@@ -34,6 +34,21 @@ public class PromptBuilderTests
     }
 
     [Fact]
+    public void BuildMode1Prompt_ContainsStrictOutputFormatRule()
+    {
+        // E2E hotfix 2026-05-14 (R-HF-5) — Claude was emitting a prose
+        // preamble and a markdown bullet list before the JSON object,
+        // causing AI_ERROR (JsonException). The prompt's OUTPUT FORMAT
+        // block tells Claude the first character must be `{` and the
+        // last must be `}`. Pin the rule so a future prompt edit cannot
+        // silently drop it.
+        var prompt = PromptBuilder.BuildMode1Prompt();
+        Assert.Contains("OUTPUT FORMAT", prompt);
+        Assert.Contains("first character MUST be `{`", prompt);
+        Assert.Contains("last character MUST be `}`", prompt);
+    }
+
+    [Fact]
     public void BuildMode1Prompt_DeclaresApplicationUsersOutputKey_AndPassthroughRule()
     {
         // Story 3.7 AC-7 — Claude's JSON shape must gain a top-level

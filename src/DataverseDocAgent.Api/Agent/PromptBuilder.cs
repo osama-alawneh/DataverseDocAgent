@@ -86,5 +86,14 @@ public static class PromptBuilder
           - Pass the role array through verbatim — do not redact or summarise role
             names returned by `get_application_users`. If the tool reports the
             sentinel "(role lookup unavailable)" for a user, preserve it exactly.
+
+        OUTPUT FORMAT — strict.
+        Your FINAL message MUST contain a single JSON object and NOTHING ELSE.
+        The first character MUST be `{` and the last character MUST be `}`.
+        Do NOT emit any preamble ("Here is the JSON", "All data has been
+        collected", etc.). Do NOT emit any explanatory bullet list before or
+        after the object. Do NOT wrap the object in markdown code fences. The
+        host parser is strict — a leading or trailing character outside the
+        object fails the run.
         """;
 }

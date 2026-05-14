@@ -124,6 +124,79 @@ public class DocumentGenerateServiceTests
         Assert.Null(parsed.ApplicationUsers);
     }
 
+    // E2E hotfix 2026-05-14 (R-HF-5) — Claude routinely chats before the
+    // JSON despite the "JSON only" prompt rule. TrimToJsonObject anchors
+    // on the first `{`/`[` and last `}`/`]` so a prose preamble / tail
+    // does not abort parsing.
+    [Fact]
+    public void TrimToJsonObject_ProsePreamble_TrimsToObject()
+    {
+        const string raw =
+            "All data has been collected. Here is the JSON.\n\n"
+            + "- Some bullet point about tables.\n\n"
+            + "{ \"organisation\": { \"environmentName\": \"x\" } }";
+        var trimmed = DocumentGenerateService.TrimToJsonObject(raw);
+        Assert.StartsWith("{", trimmed);
+        Assert.EndsWith("}",   trimmed);
+        Assert.DoesNotContain("All data has been collected.", trimmed);
+        Assert.DoesNotContain("Some bullet point",            trimmed);
+    }
+
+    [Fact]
+    public void TrimToJsonObject_ProseTail_TrimsToObject()
+    {
+        const string raw =
+            "{ \"organisation\": { \"environmentName\": \"x\" } }\n\n"
+            + "Let me know if you need more detail.";
+        var trimmed = DocumentGenerateService.TrimToJsonObject(raw);
+        Assert.EndsWith("}", trimmed);
+        Assert.DoesNotContain("Let me know", trimmed);
+    }
+
+    [Fact]
+    public void TrimToJsonObject_AlreadyClean_IsNoOp()
+    {
+        const string raw = "{\"x\":1}";
+        Assert.Equal(raw, DocumentGenerateService.TrimToJsonObject(raw));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void TrimToJsonObject_NullOrWhitespace_ReturnsEmpty(string? raw)
+    {
+        Assert.Equal(string.Empty, DocumentGenerateService.TrimToJsonObject(raw!));
+    }
+
+    [Fact]
+    public void TrimToJsonObject_NoBraces_PassesThroughForUpstreamError()
+    {
+        // No `{` or `[` — return as-is so the JSON parser (or empty-
+        // response guard) surfaces the actual problem rather than this
+        // helper silently swallowing it.
+        const string raw = "Claude returned only prose, no JSON at all.";
+        Assert.Equal(raw, DocumentGenerateService.TrimToJsonObject(raw));
+    }
+
+    [Fact]
+    public void ParseAgentJson_ProsePreambleAroundJson_ParsesCleanly()
+    {
+        // End-to-end check: ParseAgentJson must survive a Claude reply
+        // that wraps a valid JSON object in conversational prose. The
+        // existing code-fence + new prose-trim path collapse to the
+        // object before deserialisation.
+        const string raw =
+            "All data has been collected. Here is the JSON:\n\n"
+            + "```json\n"
+            + "{ \"organisation\": { \"environmentName\": \"Contoso\" }, \"tables\": [], \"keyObservations\": [] }\n"
+            + "```\n\n"
+            + "Let me know if you need more detail.";
+        var parsed = DocumentGenerateService.ParseAgentJson(raw);
+        Assert.NotNull(parsed);
+        Assert.Equal("Contoso", parsed.Organisation?.EnvironmentName);
+    }
+
     // E2E hotfix 2026-05-14 — pin the runtime hypothesis that drove the
     // RateLimitsExceeded catch reordering in `RunAsync`. The Anthropic SDK
     // makes `RateLimitsExceeded` derive from

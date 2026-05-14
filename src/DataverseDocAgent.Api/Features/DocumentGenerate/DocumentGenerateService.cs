@@ -287,7 +287,15 @@ public sealed class DocumentGenerateService : IGenerationPipeline
 
     internal static AgentJsonModel ParseAgentJson(string raw)
     {
-        var trimmed = StripCodeFences(raw);
+        // E2E hotfix 2026-05-14 (R-HF-5) — Claude routinely prepends a
+        // conversational preamble ("All data has been collected. Here is
+        // the JSON…") and occasionally a trailing comment, despite the
+        // explicit "JSON object only — no surrounding text" prompt rule.
+        // StripCodeFences handles ```json wrappers; TrimToJsonObject
+        // handles arbitrary prose around the JSON object by anchoring on
+        // the first `{` and last `}`. Both run unconditionally — if the
+        // input is already clean both helpers are near-no-ops.
+        var trimmed = TrimToJsonObject(StripCodeFences(raw));
         if (string.IsNullOrWhiteSpace(trimmed))
         {
             throw new GenerationFailureException(
@@ -312,6 +320,35 @@ public sealed class DocumentGenerateService : IGenerationPipeline
                 "Agent response was not valid JSON.",
                 ex);
         }
+    }
+
+    // E2E hotfix 2026-05-14 (R-HF-5) — anchor on the first top-level
+    // `{`/`[` and the last matching `}`/`]` so a Claude reply with prose
+    // wrapping the JSON ("Here's what I found:\n\n{ … }\n\nLet me know if…")
+    // still parses cleanly. The Mode 1 contract guarantees the root is an
+    // object, but the bracket-fallback covers a future Mode where Claude
+    // returns an array root. If neither bracket is found, returns the
+    // input unchanged so existing error paths (empty-response, invalid-
+    // JSON) surface as before.
+    internal static string TrimToJsonObject(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+        var s = raw.Trim();
+
+        var firstObj = s.IndexOf('{');
+        var firstArr = s.IndexOf('[');
+        int start;
+        char closer;
+        if (firstObj < 0 && firstArr < 0) return s;
+        if (firstObj < 0)                 { start = firstArr; closer = ']'; }
+        else if (firstArr < 0)            { start = firstObj; closer = '}'; }
+        else if (firstObj < firstArr)     { start = firstObj; closer = '}'; }
+        else                              { start = firstArr; closer = ']'; }
+
+        var end = s.LastIndexOf(closer);
+        if (end < start) return s; // mismatched / partial — let JSON parser report.
+
+        return s.Substring(start, end - start + 1);
     }
 
     internal static string StripCodeFences(string raw)
