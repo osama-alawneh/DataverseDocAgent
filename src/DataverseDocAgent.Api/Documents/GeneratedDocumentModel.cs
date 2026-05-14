@@ -27,6 +27,10 @@ public sealed class ExecutiveSummary
     public required int                    FieldCount         { get; init; }
     public required int                    RelationshipCount  { get; init; }
     public required IReadOnlyList<string>  KeyObservations    { get; init; }
+
+    // Story 3.6 — F-047 / FR-042. `required` so a future refactor cannot
+    // silently bypass the deterministic PrefixAnalyzer step.
+    public required PublisherPrefixSummary PrefixSummary      { get; init; }
 }
 
 public sealed class TableInfo

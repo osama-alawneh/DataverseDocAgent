@@ -1,6 +1,6 @@
 # Story 3.6: Publisher Prefix Intelligence
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -26,34 +26,34 @@ so that I can immediately distinguish client-built tables from Microsoft tables 
 
 ## Tasks / Subtasks
 
-- [ ] Add `PublisherPrefixSummary` to the document model (AC: 4)
-  - [ ] Create `src/DataverseDocAgent.Api/Documents/PublisherPrefixSummary.cs`
+- [x] Add `PublisherPrefixSummary` to the document model (AC: 4)
+  - [x] Create `src/DataverseDocAgent.Api/Documents/PublisherPrefixSummary.cs`
     - Properties: `string? PrimaryClientPrefix`, `IReadOnlyList<PrefixCount> MicrosoftPrefixes`, `IReadOnlyList<PrefixCount> ClientPrefixes`, `IReadOnlyList<PrefixCount> UnprefixedTables` (typically count 0 or 1 bucket), `bool NoClientPrefixDetected`.
     - Sub-record: `public sealed record PrefixCount(string Prefix, int ComponentCount)`.
-  - [ ] Extend `ExecutiveSummary` (`GeneratedDocumentModel.cs`) with a required `PublisherPrefixSummary PrefixSummary { get; init; }` slot. Required so the analyzer cannot be silently skipped.
-- [ ] Implement `PrefixAnalyzer` (AC: 1, 2, 3)
-  - [ ] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/PrefixAnalyzer.cs`
-  - [ ] Static method: `PublisherPrefixSummary Analyze(IReadOnlyList<TableInfo> tables)`
-  - [ ] Microsoft-pattern matcher: exact membership of `{ "msdyn_", "msft_", "adx_" }` OR regex `^cr([a-z0-9]+_)?$` against the **prefix segment + underscore** (i.e. compare `"cr_"` and `"crXXXX_"` shapes). Document the regex inline.
-  - [ ] Tie-break primary client prefix alphabetically on the **lowercase prefix string**, not on the raw component (Dataverse already lowercases, but the comment should pin this).
-  - [ ] Annotate file header: `// F-047 — FR-042 — Publisher Prefix Intelligence (Story 3.6)`
-- [ ] Wire analyzer into `DocumentGenerateService` (AC: 4)
-  - [ ] In `RunPipelineAsync`, immediately after `ComplexityRater.Rate` and before `DocxBuilder.Build`, call `PrefixAnalyzer.Analyze(parsed.Tables ?? Array.Empty<TableInfo>())` and inject the result into the `ExecutiveSummary` builder. The analyzer must run **before** the cancellation gate added in Story 3.5 code-review P9 (so a per-task timeout that fires between Claude returning and StoreAsync starting still produces no orphan blob).
-- [ ] Render the section in `DocxBuilder` (AC: 5, 6, 7)
-  - [ ] Inside `AppendExecutiveSummary` (after the counts table, before key observations), call a new private helper `AppendPublisherPrefixSection(body, summary.PrefixSummary, summary.TableCount)`.
-  - [ ] The helper:
+  - [x] Extend `ExecutiveSummary` (`GeneratedDocumentModel.cs`) with a required `PublisherPrefixSummary PrefixSummary { get; init; }` slot. Required so the analyzer cannot be silently skipped.
+- [x] Implement `PrefixAnalyzer` (AC: 1, 2, 3)
+  - [x] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/PrefixAnalyzer.cs`
+  - [x] Static method: `PublisherPrefixSummary Analyze(IReadOnlyList<TableInfo> tables)`
+  - [x] Microsoft-pattern matcher: exact membership of `{ "msdyn", "msft", "adx" }` (prefix segment, no trailing `_`) OR regex `^cr[a-z0-9]*$` against the prefix segment. Covers bare legacy `cr_` and the Power Apps default-environment `crXXXX_` family. Documented inline.
+  - [x] Tie-break primary client prefix alphabetically on the **lowercase prefix string**, not on the raw component (Dataverse already lowercases, but the analyzer defensively re-lowers the logical name).
+  - [x] Annotate file header: `// F-047 — FR-042 — Publisher Prefix Intelligence (Story 3.6)`
+- [x] Wire analyzer into `DocumentGenerateService` (AC: 4)
+  - [x] In `RunPipelineAsync`, immediately after `ComplexityRater.Rate` and before `DocxBuilder.Build`, call `PrefixAnalyzer.Analyze(parsed.Tables ?? Array.Empty<TableInfo>())` and inject the result into the `ExecutiveSummary` builder. The analyzer runs **before** the cancellation gate added in Story 3.5 code-review P9 (so a per-task timeout that fires between Claude returning and StoreAsync starting still produces no orphan blob).
+- [x] Render the section in `DocxBuilder` (AC: 5, 6, 7)
+  - [x] Inside `AppendExecutiveSummary` (after the counts table, before key observations), call a new private helper `AppendPublisherPrefixSection(body, summary.PrefixSummary, summary.TableCount)`.
+  - [x] The helper:
     - Returns immediately if `summary.TableCount == 0` (AC-7: no header rendered for an empty environment).
     - Emits an `H2` heading `"Publisher Prefix Summary"`.
     - Emits the one-sentence narrative paragraph computed deterministically from the summary shape (the three branches in AC-5).
     - Emits a two-column table `Prefix | Component count` using the existing `BuildTable` helper, sorted: Microsoft bucket first (descending count), then Client/ISV (descending count), then `Unprefixed` if non-empty.
-- [ ] Tests (AC: 8)
-  - [ ] Create `tests/DataverseDocAgent.Tests/PrefixAnalyzerTests.cs` — pure-logic cases.
-  - [ ] Extend `tests/DataverseDocAgent.Tests/DocxBuilderTests.cs` with one test per AC-5 branch, asserting the rendered prose AND the breakdown table presence/order.
-  - [ ] Extend `tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs` so the parsed-and-enriched model carries the `PrefixSummary` (a single small integration test is enough — the controller and orchestrator paths are unchanged).
-- [ ] No changes to (do **not** touch in this story)
-  - [ ] `PromptBuilder.cs` — Claude is intentionally NOT asked to produce prefix data. FR-011 deterministic discipline.
-  - [ ] `DataverseToolFactory.cs` — the four Mode 1 tools from Story 3.5 already supply the data via `list_custom_tables`. No new tool.
-  - [ ] `IGenerationPipeline` / `GenerationBackgroundService` — pipeline contract is unchanged.
+- [x] Tests (AC: 8)
+  - [x] Create `tests/DataverseDocAgent.Tests/PrefixAnalyzerTests.cs` — pure-logic cases (multi-underscore split, MS pattern incl. 3× crXXXX, tie-break, empty Client/ISV bucket, Unprefixed bucket, descending-count ordering).
+  - [x] Extend `tests/DataverseDocAgent.Tests/DocxBuilderTests.cs` with one test per AC-5 branch, plus the AC-7 empty-environment header-omission guard.
+  - [x] Extend `tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs` with a parse → analyze handshake test.
+- [x] No changes to (do **not** touch in this story)
+  - [x] `PromptBuilder.cs` — Claude is intentionally NOT asked to produce prefix data. FR-011 deterministic discipline.
+  - [x] `DataverseToolFactory.cs` — the four Mode 1 tools from Story 3.5 already supply the data via `list_custom_tables`. No new tool.
+  - [x] `IGenerationPipeline` / `GenerationBackgroundService` — pipeline contract is unchanged.
 
 ## Dev Notes
 
@@ -102,6 +102,32 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
+- 2026-05-14 dev — initial test run failed `Build_PublisherPrefixSection_SingleClientPrefix_RendersAllClientCustomisationsSentence` because the breakdown-table order assertion measured `IndexOf` from string start and hit the narrative's mention of `'vel_'`/`msdyn_`/`msft_` first. Fix: anchor the search past the trailing narrative sentence `"No third-party ISV components detected."` so the assertion targets only the breakdown rows. All 222 tests pass after the fix.
+
 ### Completion Notes List
 
+- Implemented deterministic `PrefixAnalyzer` (in-process, mirrors `ComplexityRater` shape) — no new Mode 1 agent tool added; FR-011 / FR-042 deterministic discipline preserved.
+- Microsoft matcher: exact set `{ msdyn, msft, adx }` plus regex `^cr[a-z0-9]*$` covering bare legacy `cr_` and the Power Apps default-environment `crXXXX_` family. Regex documented inline.
+- `ExecutiveSummary.PrefixSummary` is `required` — required-init contract prevents a future refactor from silently bypassing the analyzer.
+- `DocxBuilder.AppendPublisherPrefixSection` renders between the counts table and the key-observation bullets. Section omitted entirely when `TableCount == 0` (AC-7) — header is also omitted, matching the empty-environment Story 3.5 baseline.
+- Narrative variants: AC-5's three deterministic sentences are produced from the analyzer summary shape (no Claude involvement).
+- Tests: 222 pass (was 215 pre-story). New: 7 `PrefixAnalyzerTests` cases + 3 `DocxBuilderTests` AC-5 branches + AC-7 empty-environment header-omission assertion + 1 integration handshake in `DocumentGenerateServiceTests`.
+
 ### File List
+
+- `src/DataverseDocAgent.Api/Documents/PublisherPrefixSummary.cs` (new)
+- `src/DataverseDocAgent.Api/Features/DocumentGenerate/PrefixAnalyzer.cs` (new)
+- `src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs` (modified — required `PrefixSummary` on `ExecutiveSummary`)
+- `src/DataverseDocAgent.Api/Documents/DocxBuilder.cs` (modified — new private `AppendPublisherPrefixSection` + narrative helper + call-site)
+- `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs` (modified — analyzer call in `RunPipelineAsync`, model build picks up `PrefixSummary`)
+- `tests/DataverseDocAgent.Tests/PrefixAnalyzerTests.cs` (new)
+- `tests/DataverseDocAgent.Tests/DocxBuilderTests.cs` (modified — AC-5 branch tests, AC-7 header-omission, `BuildSampleModel` updated for required init)
+- `tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs` (modified — parse → analyze integration test)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` (modified — story 3-6 → review)
+- `_bmad-output/implementation-artifacts/story-3.6-publisher-prefix-intelligence.md` (modified — task checkboxes, Dev Agent Record, status)
+
+### Change Log
+
+| Date       | Change                                                                       |
+|------------|------------------------------------------------------------------------------|
+| 2026-05-14 | Story 3.6 implemented — PrefixAnalyzer + Publisher Prefix Summary sub-section; 222 tests pass. |

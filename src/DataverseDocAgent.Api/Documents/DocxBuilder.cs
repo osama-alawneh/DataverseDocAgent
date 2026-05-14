@@ -1,4 +1,6 @@
 // F-013 — FR-013 — DocxBuilder produces the Mode 1 .docx (Story 3.5, PRD §8.1)
+// F-047 — FR-042 — Publisher Prefix Summary sub-section (Story 3.6)
+using System.Text;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -70,6 +72,11 @@ public static class DocxBuilder
             });
         body.AppendChild(counts);
 
+        // Story 3.6 — F-047 / FR-042. Renders between the counts table and
+        // the key-observation bullets per AC-5. Omitted entirely for an
+        // empty environment (AC-7).
+        AppendPublisherPrefixSection(body, summary.PrefixSummary, summary.TableCount);
+
         AppendHeading(body, "Key observations", level: 2);
         // Story 3.5 code-review P3 — defensively filter null entries; JSON
         // `null` inside an array of strings deserialises to a real null and
@@ -88,6 +95,79 @@ public static class DocxBuilder
                 AppendBulletParagraph(body, observation);
             }
         }
+    }
+
+    // ── Story 3.6 — Publisher Prefix Summary sub-section ─────────────────────
+
+    private static void AppendPublisherPrefixSection(
+        Body body,
+        PublisherPrefixSummary prefixSummary,
+        int tableCount)
+    {
+        // AC-7 — for an empty environment we render nothing (not even the
+        // heading), so the Section 1 layout matches the Story 3.5 baseline.
+        if (tableCount == 0) return;
+
+        AppendHeading(body, "Publisher Prefix Summary", level: 2);
+        AppendParagraph(body, BuildPrefixNarrative(prefixSummary));
+
+        // AC-6 — breakdown table: Microsoft (desc count) → Client/ISV (desc
+        // count) → Unprefixed. Trailing underscore on bucketed prefixes,
+        // literal "(no prefix)" for the Unprefixed row.
+        var rows = new List<string[]>(
+            prefixSummary.MicrosoftPrefixes.Count +
+            prefixSummary.ClientPrefixes.Count +
+            prefixSummary.UnprefixedTables.Count);
+
+        foreach (var row in prefixSummary.MicrosoftPrefixes)
+        {
+            rows.Add(new[] { row.Prefix + "_", row.ComponentCount.ToString() });
+        }
+        foreach (var row in prefixSummary.ClientPrefixes)
+        {
+            rows.Add(new[] { row.Prefix + "_", row.ComponentCount.ToString() });
+        }
+        foreach (var row in prefixSummary.UnprefixedTables)
+        {
+            // Stored as the literal label by PrefixAnalyzer; do not append "_".
+            rows.Add(new[] { row.Prefix, row.ComponentCount.ToString() });
+        }
+
+        if (rows.Count > 0)
+        {
+            body.AppendChild(BuildTable(
+                new[] { "Prefix", "Component count" },
+                rows.ToArray()));
+        }
+    }
+
+    private static string BuildPrefixNarrative(PublisherPrefixSummary p)
+    {
+        // AC-5 branches are deterministic on the analyzer output shape so the
+        // sub-section prose is reproducible across runs (FR-042).
+        if (p.ClientPrefixes.Count == 0)
+        {
+            return "No client-defined publisher prefix detected — all custom components use default or Microsoft prefixes.";
+        }
+
+        if (p.ClientPrefixes.Count == 1)
+        {
+            var primary = p.ClientPrefixes[0].Prefix;
+            var sb = new StringBuilder();
+            sb.Append("All client customisations use the prefix '").Append(primary).Append("_'.");
+            if (p.MicrosoftPrefixes.Count > 0)
+            {
+                var msList = string.Join(", ", p.MicrosoftPrefixes.Select(m => m.Prefix + "_"));
+                sb.Append(" Microsoft components use ").Append(msList).Append('.');
+            }
+            sb.Append(" No third-party ISV components detected.");
+            return sb.ToString();
+        }
+
+        var top = p.ClientPrefixes[0];
+        return
+            "Multiple custom prefixes detected — environment may have multiple development teams or migration history. " +
+            $"Primary client prefix: '{top.Prefix}_' ({top.ComponentCount} components). See full breakdown below.";
     }
 
     private static void AppendCustomTablesSection(Body body, IReadOnlyList<TableInfo> tables)

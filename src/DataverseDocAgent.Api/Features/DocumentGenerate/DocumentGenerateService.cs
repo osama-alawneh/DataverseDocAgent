@@ -173,6 +173,12 @@ public sealed class DocumentGenerateService : IGenerationPipeline
         var fieldCount        = parsed.Fields?.Values.Sum(f => f?.Count ?? 0) ?? 0;
         var relationshipCount = parsed.Relationships?.Values.Sum(r => r?.Count ?? 0) ?? 0;
         var rating            = ComplexityRater.Rate(tableCount, fieldCount, relationshipCount);
+        var tables            = (IReadOnlyList<TableInfo>?)parsed.Tables ?? Array.Empty<TableInfo>();
+
+        // Story 3.6 — F-047 / FR-042. Deterministic publisher-prefix breakdown,
+        // computed BEFORE the cancellation gate so a cancelled job emits no
+        // blob and the analyzer cost is observable on the per-job log line.
+        var prefixSummary = PrefixAnalyzer.Analyze(tables);
 
         var model = new GeneratedDocumentModel
         {
@@ -188,8 +194,9 @@ public sealed class DocumentGenerateService : IGenerationPipeline
                 FieldCount        = fieldCount,
                 RelationshipCount = relationshipCount,
                 KeyObservations   = (IReadOnlyList<string>?)parsed.KeyObservations ?? Array.Empty<string>(),
+                PrefixSummary     = prefixSummary,
             },
-            Tables        = (IReadOnlyList<TableInfo>?)parsed.Tables ?? Array.Empty<TableInfo>(),
+            Tables        = tables,
             Fields        = CoerceDict(parsed.Fields),
             Relationships = CoerceDict(parsed.Relationships),
         };
