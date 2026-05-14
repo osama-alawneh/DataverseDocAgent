@@ -71,13 +71,19 @@ public static class DocxBuilder
         body.AppendChild(counts);
 
         AppendHeading(body, "Key observations", level: 2);
-        if (summary.KeyObservations.Count == 0)
+        // Story 3.5 code-review P3 — defensively filter null entries; JSON
+        // `null` inside an array of strings deserialises to a real null and
+        // would NRE the OpenXml Text element.
+        var observations = summary.KeyObservations
+            .Where(o => !string.IsNullOrWhiteSpace(o))
+            .ToList();
+        if (observations.Count == 0)
         {
             AppendParagraph(body, "(No key observations were produced by the agent.)", italic: true);
         }
         else
         {
-            foreach (var observation in summary.KeyObservations)
+            foreach (var observation in observations)
             {
                 AppendBulletParagraph(body, observation);
             }
@@ -258,8 +264,10 @@ public static class DocxBuilder
         body.AppendChild(paragraph);
     }
 
-    private static Run MakeRun(string text, bool bold = false, bool italic = false, int? sizeHalfPoints = null)
+    private static Run MakeRun(string? text, bool bold = false, bool italic = false, int? sizeHalfPoints = null)
     {
+        // Story 3.5 code-review P3 — `Text(null)` throws in some OpenXml builds; coerce.
+        var safeText = text ?? string.Empty;
         var runProps = new RunProperties();
         runProps.AppendChild(new RunFonts { Ascii = FontName, HighAnsi = FontName });
         if (bold)   runProps.AppendChild(new Bold());
@@ -269,7 +277,7 @@ public static class DocxBuilder
 
         // Preserve internal whitespace so multi-space alignment in observations is not collapsed.
         var run = new Run(runProps,
-            new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+            new Text(safeText) { Space = SpaceProcessingModeValues.Preserve });
         return run;
     }
 

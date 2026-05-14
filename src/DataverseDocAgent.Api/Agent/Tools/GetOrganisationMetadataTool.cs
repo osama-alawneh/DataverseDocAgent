@@ -83,19 +83,30 @@ public sealed class GetOrganisationMetadataTool : IDataverseTool
         {
             return Task.FromResult(SerializeError("Dataverse call failed while retrieving organisation metadata"));
         }
+        catch
+        {
+            // Story 3.5 code-review P7 — sibling-tool error-contract parity.
+            // Anything not handled by the typed branches above (InvalidPluginExecutionException,
+            // unexpected SDK shapes, etc.) must still return the structured `{ error }` JSON
+            // so the orchestrator never sees a raw exception escape this tool.
+            return Task.FromResult(SerializeError("Unexpected failure while retrieving organisation metadata"));
+        }
     }
 
     private static string? ResolveLanguageName(int? lcid)
     {
         if (lcid is null or 0) return null;
+        if (lcid.Value < 0) return $"LCID {lcid.Value}";
         try
         {
             return CultureInfo.GetCultureInfo(lcid.Value).EnglishName;
         }
-        catch (CultureNotFoundException)
+        catch (Exception ex) when (ex is CultureNotFoundException or ArgumentOutOfRangeException)
         {
-            // Unknown LCID — surface the raw number to Claude rather than fabricating a name.
-            return null;
+            // Story 3.5 code-review P6/P8 — corrupted or non-Windows LCIDs (negative
+            // values; out-of-range positives) must not escape this tool. Surface the
+            // raw LCID number to Claude rather than fabricating or omitting.
+            return $"LCID {lcid.Value}";
         }
     }
 

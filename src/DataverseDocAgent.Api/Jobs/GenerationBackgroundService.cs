@@ -92,10 +92,16 @@ public sealed class GenerationBackgroundService : BackgroundService
         }
         catch (GenerationFailureException ex)
         {
-            // NFR-014 — typed pipeline failure. Inner-exception detail goes to the
-            // structured log (CredentialDestructuringPolicy already redacts EnvironmentCredentials).
-            _logger.LogError(ex, "Generation task {JobId} failed with code {Code}",
-                task.JobId, ex.Code);
+            // NFR-014 — typed pipeline failure. Story 3.5 code-review P10: do NOT
+            // pass the exception instance to LogError — Serilog auto-expands the
+            // inner-exception chain (ToString()), and some SDK exception messages
+            // can carry tenant/authority fragments that `CredentialDestructuringPolicy`
+            // does not scrub. Log only the public code and the structural type names.
+            _logger.LogWarning(
+                "Generation task {JobId} failed with code {Code} (inner={InnerType})",
+                task.JobId,
+                ex.Code,
+                ex.InnerException?.GetType().FullName ?? "none");
             _jobStore.UpdateStatus(task.JobId, JobStatus.Failed,
                 downloadToken: null,
                 errorMessage:  SanitisedClientMessage(ex.Code),
@@ -106,10 +112,13 @@ public sealed class GenerationBackgroundService : BackgroundService
         {
             // NFR-007 — Do NOT surface ex.Message on the job record. SDK exceptions
             // can embed tenant ids, authority URLs, or payload bytes. The polling
-            // client sees a generic reason; the full exception lands in Serilog
-            // (which already clamps the Dataverse/Anthropic namespaces to Warning
-            // and runs `CredentialDestructuringPolicy`).
-            _logger.LogError(ex, "Generation task {JobId} failed", task.JobId);
+            // client sees a generic reason. As above (P10), log only the exception's
+            // public type so structural diagnostics are preserved without leaking
+            // message contents.
+            _logger.LogError(
+                "Generation task {JobId} failed with unhandled {ExceptionType}",
+                task.JobId,
+                ex.GetType().FullName);
             _jobStore.UpdateStatus(task.JobId, JobStatus.Failed,
                 downloadToken: null,
                 errorMessage:  "Generation failed. Check server logs for details.",

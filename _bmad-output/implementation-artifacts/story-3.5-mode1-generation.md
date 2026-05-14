@@ -1,6 +1,6 @@
 # Story 3.5: Mode 1 — POST /api/document/generate Endpoint and Full Request-to-Download Flow
 
-Status: review
+Status: done
 
 ## Story
 
@@ -175,6 +175,35 @@ claude-sonnet-4-6
 ### Change Log
 
 - 2026-05-14 — Initial implementation. POST /api/document/generate end-to-end pipeline: rate-limited controller → bounded background worker → connection test → 4-tool agent loop → deterministic complexity rating → DocxBuilder → InMemoryDocumentStore. Job-record schema extended with structured error codes + retry hints (NFR-014). 28 new unit tests added; suite: 195 passed / 0 failed.
+- 2026-05-14 — Applied code review patches P1–P12 (host-shutdown race guard, channel-write recovery, null-safe bullets, asymmetric code-fence strip fix, missing-API-key warning, negative LCID handling, sibling-tool error contract, baseLanguageName fallback, pre-store cancellation check, NFR-007 logging tightening, AC-10 finally-block timing, additional tests).
+
+### Review Findings
+
+Multi-agent adversarial review (Blind Hunter + Edge Case Hunter + Acceptance Auditor) on commit 7407def, 2026-05-14.
+
+**Patches (resolved in follow-up commit):**
+
+- [x] [Review][Patch] P1 — Terminal-state guard on `InMemoryJobStore.UpdateStatus` so a `Ready` job cannot be silently overwritten by a late `Failed` (host-shutdown race) [src/DataverseDocAgent.Api/Jobs/InMemoryJobStore.cs]
+- [x] [Review][Patch] P2 — Wrap `Channel.Writer.WriteAsync` in `DocumentGenerateController` so a write failure marks the just-created job `Failed` instead of orphaning it as `Queued` [src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateController.cs]
+- [x] [Review][Patch] P3 — `DocxBuilder` null-safes bullet/text rendering so a `keyObservations` list containing a literal JSON `null` does not NRE the OpenXml pipeline [src/DataverseDocAgent.Api/Documents/DocxBuilder.cs]
+- [x] [Review][Patch] P4 — `StripCodeFences` only strips a trailing ` ``` ` when a matching leading fence was found (prevents corruption of a fence-less JSON body ending with literal backticks) [src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs]
+- [x] [Review][Patch] P5 — Startup-time warning when `Anthropic:ApiKey` is missing so the AI_ERROR fallback is observable [src/DataverseDocAgent.Api/Program.cs]
+- [x] [Review][Patch] P6 — `ResolveLanguageName` catches `ArgumentOutOfRangeException` in addition to `CultureNotFoundException` so a corrupted negative LCID does not escape the tool boundary [src/DataverseDocAgent.Api/Agent/Tools/GetOrganisationMetadataTool.cs]
+- [x] [Review][Patch] P7 — Generic `Exception` catch added to `GetOrganisationMetadataTool.ExecuteAsync` matching sibling-tool error contract (`{ error }`) [src/DataverseDocAgent.Api/Agent/Tools/GetOrganisationMetadataTool.cs]
+- [x] [Review][Patch] P8 — `BaseLanguageName` falls back to `"LCID {n}"` when the OS culture table cannot resolve the language, matching the inline comment's promise [src/DataverseDocAgent.Api/Agent/Tools/GetOrganisationMetadataTool.cs]
+- [x] [Review][Patch] P9 — `ct.ThrowIfCancellationRequested()` before `IDocumentStore.StoreAsync` so a timeout cannot orphan a 24h blob [src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs]
+- [x] [Review][Patch] P10 — Failure logging drops the `LogError(ex, ...)` auto-expansion of the inner-exception chain so SDK exception text (potentially carrying tenant id / authority URL fragments) does not reach Serilog (NFR-007) [src/DataverseDocAgent.Api/Jobs/GenerationBackgroundService.cs]
+- [x] [Review][Patch] P11 — Elapsed-time log moved to `finally` so AC-10 baseline measurement captures failure-mode durations, not just success [src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs]
+- [x] [Review][Patch] P12 — Tests added: 24h TTL flows into `IDocumentStore.StoreAsync`, controller never lands credentials in the logger scope [tests/DataverseDocAgent.Tests/]
+
+**Deferred (recorded in deferred-work.md):**
+
+- [x] [Review][Defer] Queued-but-not-dequeued jobs are silently dropped on host shutdown (Channel.Writer.Complete() not called by anyone) — pre-existing Story 3.1 architecture
+- [x] [Review][Defer] Synchronous Dataverse SDK tool calls ignore the per-task `CancellationToken` (SDK v1.2.10 limitation; Story 3.4 F4 carry-over) — AC-9 timeout cannot interrupt a hung tool until it returns
+- [x] [Review][Defer] No automated assertion for AC-1 `<2s` response SLO — covered by deferred manual E2E
+- [x] [Review][Defer] `Channel<GenerationTask>` is unbounded (Story 3.1 carry-over) — bounded-channel decision still open
+
+**Dismissed (noise / acknowledged scope / works-by-accident):** 18 findings — Word-style heading vs inline runs, bullet glyph vs Word numbering, GUID/URL shape validation (works by failing at SDK boundary with CREDENTIAL_REJECTED), DateTime tick race in core props XML, AC-4 "three vs four tools" wording drift (already updated in Tasks), AC-9 enum literal vs HOST_SHUTDOWN/GENERATION_FAILED additions (NFR-014 spirit), zero-table-env Low rating, environment URL echoed via tool (not secret), iteration-cap sentinel string-compare brittleness, RetrieveVersionResponse.Version null/whitespace handling, etc.
 
 ### Completion Notes List
 

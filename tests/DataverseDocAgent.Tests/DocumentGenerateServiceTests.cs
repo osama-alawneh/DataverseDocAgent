@@ -41,4 +41,22 @@ public class DocumentGenerateServiceTests
         var result = DocumentGenerateService.StripCodeFences("  {\"k\":1}  ");
         Assert.Equal("{\"k\":1}", result);
     }
+
+    [Fact]
+    public void StripCodeFences_NoLeadingFence_PreservesTrailingBackticks()
+    {
+        // Story 3.5 code-review P4 — a fence-less JSON body whose string content
+        // ends in three backticks must survive intact. Previously the trailing
+        // strip ran unconditionally and corrupted the body.
+        const string body = "{\"x\":\"code: ```\"}";
+        var result = DocumentGenerateService.StripCodeFences(body);
+        Assert.Equal(body, result);
+    }
+
+    [Fact]
+    public void StripCodeFences_LeadingJsonFence_StripsBothEnds()
+    {
+        var result = DocumentGenerateService.StripCodeFences("```json\n{\"x\":1}\n```");
+        Assert.Equal("{\"x\":1}", result);
+    }
 }

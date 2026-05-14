@@ -81,6 +81,42 @@ public class DocxBuilderTests
         Assert.NotNull(doc.MainDocumentPart!.Document!.Body);
     }
 
+    [Fact]
+    public void Build_NullAndEmptyKeyObservations_AreFilteredAndDoNotThrow()
+    {
+        // Story 3.5 code-review P3 — JSON `null` deserialising into a List<string>
+        // produces a real null entry; DocxBuilder must filter rather than NRE.
+        var model = new GeneratedDocumentModel
+        {
+            Summary = new ExecutiveSummary
+            {
+                EnvironmentName   = "Edge Case Org",
+                ScanDate          = DateTime.UtcNow,
+                ComplexityRating  = "Low",
+                TableCount        = 0,
+                FieldCount        = 0,
+                RelationshipCount = 0,
+                KeyObservations   = new string?[] { null, "real observation", "", "   " }!
+                    .Cast<string>()
+                    .ToArray(),
+            },
+            Tables        = Array.Empty<TableInfo>(),
+            Fields        = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
+            Relationships = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
+        };
+
+        var bytes = DocxBuilder.Build(model);
+
+        Assert.NotEmpty(bytes);
+        using var ms = new MemoryStream(bytes, writable: false);
+        using var doc = WordprocessingDocument.Open(ms, isEditable: false);
+        var text = string.Join("\n",
+            doc.MainDocumentPart!.Document!.Body!.Descendants<Text>().Select(t => t.Text ?? string.Empty));
+        Assert.Contains("real observation", text);
+        // Null/empty/whitespace entries are dropped — no stray "• " bullet.
+        Assert.DoesNotContain("• \n",  text);
+    }
+
     private static GeneratedDocumentModel BuildSampleModel() => new()
     {
         Summary = new ExecutiveSummary

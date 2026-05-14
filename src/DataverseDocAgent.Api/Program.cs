@@ -165,6 +165,17 @@ app.MapControllers();
 // NFR-006 — Health endpoint for uptime measurement (no auth required)
 app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }));
 
+// Story 3.5 code-review P5 — surface a missing Anthropic key at startup so
+// generation requests don't silently end as AI_ERROR forever. The DI singleton
+// itself is registered lazily; this is observability only.
+var anthropicKey = builder.Configuration["Anthropic:ApiKey"];
+if (string.IsNullOrWhiteSpace(anthropicKey))
+{
+    Log.Warning(
+        "Anthropic:ApiKey is not configured — all /api/document/generate requests will fail with AI_ERROR. " +
+        "Set it via dotnet user-secrets or appsettings.{Environment}.json.");
+}
+
 // Log startup confirmation
 Log.Information("DataverseDocAgent.Api started successfully");
 

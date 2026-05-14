@@ -96,6 +96,36 @@ public class DocumentGenerateControllerTests
         Assert.Equal(CredentialEndpointsRateLimitOptions.PolicyName, attr!.PolicyName);
     }
 
+    [Fact]
+    public async Task Generate_ChannelClosed_FlipsJobToFailed_AndRethrows()
+    {
+        // Story 3.5 code-review P2 — a closed channel during shutdown must not
+        // leave the freshly-created job stuck in Queued. The controller flips it
+        // to Failed/GENERATION_FAILED before rethrowing.
+        var store    = new InMemoryJobStore();
+        var channel  = Channel.CreateUnbounded<GenerationTask>();
+        channel.Writer.Complete(); // simulate host shutdown
+        var controller = new DocumentGenerateController(store, channel);
+        var request    = ValidRequest();
+
+        await Assert.ThrowsAsync<ChannelClosedException>(() =>
+            controller.Generate(request, CancellationToken.None));
+
+        // Exactly one job was created and it is now terminal.
+        var jobIds = typeof(InMemoryJobStore)
+            .GetField("_jobs", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(store);
+        Assert.NotNull(jobIds);
+
+        // Walk: there should be one job and it should be Failed.
+        var dict = (System.Collections.IDictionary)jobIds!;
+        var key  = Assert.Single(dict.Keys.Cast<object>());
+        var record = store.GetJob((string)key)!;
+        Assert.Equal(JobStatus.Failed, record.Status);
+        Assert.Equal("GENERATION_FAILED", record.ErrorCode);
+        Assert.True(record.SafeToRetry);
+    }
+
     private static DocumentGenerateRequest ValidRequest() => new()
     {
         EnvironmentUrl = "https://example.crm.dynamics.com",

@@ -49,94 +49,98 @@ public sealed class DocumentGenerateService : IGenerationPipeline
     public async Task<string> RunAsync(GenerationTask task, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
+        var outcome   = "unknown";
 
-        // ── Step 1: Connect ───────────────────────────────────────────────────
-        Microsoft.PowerPlatform.Dataverse.Client.ServiceClient client;
         try
         {
-            client = await _connectionFactory.ConnectAsync(task.Credentials, cancellationToken);
-        }
-        catch (DataverseConnectionException ex)
-        {
-            // AC-3 — connection rejection is the dedicated CREDENTIAL_REJECTED code.
-            // The factory has already sanitised the message; credentials go out of
-            // scope when this method returns (NFR-007).
-            throw new GenerationFailureException(
-                JobFailureCodes.CredentialRejected,
-                safeToRetry: false,
-                "Credentials were rejected by Dataverse.",
-                ex);
-        }
-
-        // ── Steps 2–10: Run pipeline against the connected client ────────────
-        using (client)
-        {
-            string downloadToken;
+            // ── Step 1: Connect ───────────────────────────────────────────────
+            Microsoft.PowerPlatform.Dataverse.Client.ServiceClient client;
             try
             {
-                downloadToken = await RunPipelineAsync(
-                    client, task.Credentials.EnvironmentUrl, cancellationToken);
+                client = await _connectionFactory.ConnectAsync(task.Credentials, cancellationToken);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (DataverseConnectionException ex)
             {
-                // Either per-task timeout (10 min) or host shutdown. Background service
-                // disambiguates based on which token tripped. Propagate without
-                // wrapping — OCE is the canonical signal.
-                throw;
-            }
-            catch (GenerationFailureException)
-            {
-                // Already typed — surface as-is so the bg service preserves the code.
-                throw;
-            }
-            catch (FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> ex)
-            {
+                // AC-3 — connection rejection is the dedicated CREDENTIAL_REJECTED code.
+                outcome = JobFailureCodes.CredentialRejected;
                 throw new GenerationFailureException(
-                    JobFailureCodes.DataverseError,
-                    safeToRetry: true,
-                    "Dataverse fault during environment scan.",
-                    ex);
-            }
-            catch (Exception ex) when (ex is TimeoutException
-                                            or CommunicationException
-                                            or System.Net.Http.HttpRequestException)
-            {
-                throw new GenerationFailureException(
-                    JobFailureCodes.DataverseError,
-                    safeToRetry: true,
-                    "Network failure during environment scan.",
-                    ex);
-            }
-            catch (Anthropic.SDK.RateLimitsExceeded ex)
-            {
-                throw new GenerationFailureException(
-                    JobFailureCodes.AiError,
-                    safeToRetry: true,
-                    "Anthropic API rate limit exceeded.",
-                    ex);
-            }
-            catch (Exception ex)
-            {
-                // Anthropic SDK does not export a public common base for transport
-                // errors in v5.10.0 — catch-all reaches AI_ERROR by default because
-                // the most likely remaining failure mode after the typed branches
-                // above is the agent loop. CONTEXT: the bg service still has a
-                // generic catch that surfaces GENERATION_FAILED — that one fires
-                // only if a non-Exception derived throw somehow reaches it.
-                throw new GenerationFailureException(
-                    JobFailureCodes.AiError,
-                    safeToRetry: true,
-                    "Agent orchestration failed.",
+                    JobFailureCodes.CredentialRejected,
+                    safeToRetry: false,
+                    "Credentials were rejected by Dataverse.",
                     ex);
             }
 
+            using (client)
+            {
+                try
+                {
+                    var downloadToken = await RunPipelineAsync(
+                        client, task.Credentials.EnvironmentUrl, cancellationToken);
+                    outcome = "ready";
+                    return downloadToken;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    outcome = "cancelled";
+                    throw;
+                }
+                catch (GenerationFailureException ex)
+                {
+                    outcome = ex.Code;
+                    throw;
+                }
+                catch (FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> ex)
+                {
+                    outcome = JobFailureCodes.DataverseError;
+                    throw new GenerationFailureException(
+                        JobFailureCodes.DataverseError,
+                        safeToRetry: true,
+                        "Dataverse fault during environment scan.",
+                        ex);
+                }
+                catch (Exception ex) when (ex is TimeoutException
+                                                or CommunicationException
+                                                or System.Net.Http.HttpRequestException)
+                {
+                    outcome = JobFailureCodes.DataverseError;
+                    throw new GenerationFailureException(
+                        JobFailureCodes.DataverseError,
+                        safeToRetry: true,
+                        "Network failure during environment scan.",
+                        ex);
+                }
+                catch (Anthropic.SDK.RateLimitsExceeded ex)
+                {
+                    outcome = JobFailureCodes.AiError;
+                    throw new GenerationFailureException(
+                        JobFailureCodes.AiError,
+                        safeToRetry: true,
+                        "Anthropic API rate limit exceeded.",
+                        ex);
+                }
+                catch (Exception ex)
+                {
+                    outcome = JobFailureCodes.AiError;
+                    throw new GenerationFailureException(
+                        JobFailureCodes.AiError,
+                        safeToRetry: true,
+                        "Agent orchestration failed.",
+                        ex);
+                }
+            }
+        }
+        finally
+        {
+            // Story 3.5 code-review P11 — log elapsed time on ALL paths
+            // (success + failure) so AC-10 baseline measurement reflects the
+            // distribution of failure-mode durations, not only happy-path runs.
+            // NFR-007: no credential data is in scope here.
             stopwatch.Stop();
-            // NFR-001 — elapsed time only; no credential surface.
             _logger.LogInformation(
-                "Mode 1 generation completed for job {JobId} in {ElapsedSeconds:F1}s",
+                "Mode 1 generation finished for job {JobId} in {ElapsedSeconds:F1}s — outcome={Outcome}",
                 task.JobId,
-                stopwatch.Elapsed.TotalSeconds);
-            return downloadToken;
+                stopwatch.Elapsed.TotalSeconds,
+                outcome);
         }
     }
 
@@ -192,6 +196,13 @@ public sealed class DocumentGenerateService : IGenerationPipeline
 
         // ── Render + store ────────────────────────────────────────────────────
         var bytes = DocxBuilder.Build(model);
+
+        // Story 3.5 code-review P9 — observe cancellation immediately before
+        // committing the blob. `IDocumentStore.StoreAsync` itself does not
+        // accept a CT (Phase 1), so if the per-task CTS just tripped we would
+        // otherwise persist a 24-hour blob nobody can reach.
+        cancellationToken.ThrowIfCancellationRequested();
+
         return await _documentStore.StoreAsync(bytes, TimeSpan.FromHours(24));
     }
 
@@ -251,20 +262,29 @@ public sealed class DocumentGenerateService : IGenerationPipeline
         // Claude occasionally wraps JSON in ```json ... ``` despite explicit
         // instructions. Strip a single leading fence and the matching trailing
         // fence; leave any inner backticks alone.
+        //
+        // Story 3.5 code-review P4 — only strip the trailing fence when a
+        // leading fence was actually found. Otherwise a fence-less JSON body
+        // whose last meaningful character is part of a string ending in three
+        // backticks (e.g. `{"x":"\`\`\`"}`) loses its closing chars and fails
+        // to parse.
         const string fenceStart  = "```";
         const string fenceJson   = "```json";
         const string fenceEnd    = "```";
 
+        var leadingFenceFound = false;
         if (s.StartsWith(fenceJson, StringComparison.OrdinalIgnoreCase))
         {
             s = s.Substring(fenceJson.Length).TrimStart('\r', '\n', ' ', '\t');
+            leadingFenceFound = true;
         }
         else if (s.StartsWith(fenceStart, StringComparison.Ordinal))
         {
             s = s.Substring(fenceStart.Length).TrimStart('\r', '\n', ' ', '\t');
+            leadingFenceFound = true;
         }
 
-        if (s.EndsWith(fenceEnd, StringComparison.Ordinal))
+        if (leadingFenceFound && s.EndsWith(fenceEnd, StringComparison.Ordinal))
         {
             s = s.Substring(0, s.Length - fenceEnd.Length).TrimEnd();
         }

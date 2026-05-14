@@ -7,6 +7,7 @@ using DataverseDocAgent.Api.Jobs;
 using DataverseDocAgent.Shared.Dataverse;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+// ChannelClosedException is in System.Threading.Channels (above).
 
 namespace DataverseDocAgent.Api.Features.DocumentGenerate;
 
@@ -63,9 +64,26 @@ public sealed class DocumentGenerateController : ControllerBase
 
         // WriteAsync respects the channel's bound (when configured). Unbounded today;
         // the bounded-channel decision is tracked in deferred-work.md.
-        await _channel.Writer.WriteAsync(
-            new GenerationTask(jobId, credentials),
-            cancellationToken);
+        //
+        // Story 3.5 code-review P2 — if WriteAsync throws (channel completed during
+        // shutdown, or caller cancellation), the freshly-seeded job otherwise sits
+        // in Queued forever. Mark it Failed/GENERATION_FAILED safeToRetry=true so a
+        // polling client gets a deterministic terminal state.
+        try
+        {
+            await _channel.Writer.WriteAsync(
+                new GenerationTask(jobId, credentials),
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is ChannelClosedException or OperationCanceledException)
+        {
+            _jobStore.UpdateStatus(jobId, JobStatus.Failed,
+                downloadToken: null,
+                errorMessage:  "Generation could not be enqueued; the host may be shutting down.",
+                errorCode:     JobFailureCodes.GenerationFailed,
+                safeToRetry:   true);
+            throw;
+        }
 
         return StatusCode(StatusCodes.Status202Accepted,
             new DocumentGenerateResponse { JobId = jobId });
