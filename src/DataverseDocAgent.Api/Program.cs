@@ -58,8 +58,16 @@ builder.Services.AddControllers()
     });
 builder.Services.AddEndpointsApiExplorer();
 
-// F-029, F-030, F-031 — Permission checker services (Story 2.2)
-builder.Services.AddScoped<IDataverseConnectionFactory, DataverseConnectionFactory>();
+// F-029, F-030, F-031 — Permission checker services (Story 2.2).
+// IDataverseConnectionFactory is Singleton because the implementation is
+// stateless (no instance fields; constructs a fresh ServiceClient per
+// ConnectAsync call). Singleton lifetime is required so the Singleton
+// `IGenerationPipeline` / hosted `GenerationBackgroundService` can consume
+// it without tripping the .NET 8 ValidateScopes check at startup
+// (Scoped → Singleton capture is the classic captive-dependency bug).
+// `SecurityCheckService` stays Scoped — it has request-scoped logger state
+// and consumes the now-Singleton factory cleanly (Scoped → Singleton is OK).
+builder.Services.AddSingleton<IDataverseConnectionFactory, DataverseConnectionFactory>();
 builder.Services.AddScoped<SecurityCheckService>();
 
 // F-036 — Async job infrastructure (Story 3.1).
