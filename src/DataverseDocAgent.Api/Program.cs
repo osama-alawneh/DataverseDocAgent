@@ -88,10 +88,19 @@ builder.Services.AddHostedService<GenerationBackgroundService>();
 // the failure surfaces on first generation request as AI_ERROR, where it can be
 // observed and retried, rather than as a fatal host startup crash that blocks
 // the security-check endpoint (which has no Anthropic dependency).
+//
+// E2E hotfix 2026-05-14 (R-HF-6) — the SDK's default HttpClient has
+// `Timeout = 100s`. Mode 1 final-iteration completions on real environments
+// routinely exceed that (one call observed at 123.7s on user's env →
+// AI_ERROR inner=TaskCanceledException). Inject a longer-timeout HttpClient
+// so per-Anthropic-call timeout fits within the NFR-001 envelope (Large = 10
+// min total Mode 1 budget). The outer per-task token in
+// GenerationBackgroundService still bounds wall-clock for the whole job.
 builder.Services.AddSingleton<AnthropicClient>(sp =>
 {
     var apiKey = sp.GetRequiredService<IConfiguration>()["Anthropic:ApiKey"] ?? string.Empty;
-    return new AnthropicClient(apiKey);
+    var http   = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+    return new AnthropicClient(new Anthropic.SDK.APIAuthentication(apiKey), http, null!);
 });
 builder.Services.AddSingleton<Func<AgentOrchestrator>>(sp => () =>
     new AgentOrchestrator(
