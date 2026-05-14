@@ -1,0 +1,58 @@
+// F-013 — FR-013 — Structured input to the .docx builder (Story 3.5)
+namespace DataverseDocAgent.Api.Documents;
+
+/// <summary>
+/// Strongly-typed view of Claude's Mode 1 output after it has been parsed and
+/// enriched with deterministic values (scan date, complexity rating, counts).
+/// <see cref="DocxBuilder"/> consumes only this type so the JSON parsing rules
+/// are isolated in <c>DocumentGenerateService</c>.
+/// </summary>
+public sealed class GeneratedDocumentModel
+{
+    public required ExecutiveSummary                       Summary       { get; init; }
+    public required IReadOnlyList<TableInfo>               Tables        { get; init; }
+    public required IReadOnlyDictionary<string, IReadOnlyList<FieldInfo>>        Fields        { get; init; }
+    public required IReadOnlyDictionary<string, IReadOnlyList<RelationshipInfo>> Relationships { get; init; }
+}
+
+public sealed class ExecutiveSummary
+{
+    public required string?                EnvironmentName    { get; init; }
+    public          string?                EnvironmentUrl     { get; init; }
+    public          string?                Version            { get; init; }
+    public          string?                BaseLanguageName   { get; init; }
+    public required DateTime               ScanDate           { get; init; }
+    public required string                 ComplexityRating   { get; init; }
+    public required int                    TableCount         { get; init; }
+    public required int                    FieldCount         { get; init; }
+    public required int                    RelationshipCount  { get; init; }
+    public required IReadOnlyList<string>  KeyObservations    { get; init; }
+}
+
+public sealed class TableInfo
+{
+    public required string  LogicalName  { get; init; }
+    public          string? DisplayName  { get; init; }
+    public          string? SchemaName   { get; init; }
+    public          string? SolutionName { get; init; }
+    public          string? Description  { get; init; }
+    public          string? Purpose      { get; init; }
+}
+
+public sealed class FieldInfo
+{
+    public required string  LogicalName   { get; init; }
+    public          string? DisplayName   { get; init; }
+    public          string? AttributeType { get; init; }
+    public          string? RequiredLevel { get; init; }
+    public          string? Description   { get; init; }
+}
+
+public sealed class RelationshipInfo
+{
+    public          string? SchemaName       { get; init; }
+    public          string? RelationshipType { get; init; }
+    public          string? RelatedEntity    { get; init; }
+    public          string? CascadeDelete    { get; init; }
+    public          string? BusinessMeaning  { get; init; }
+}

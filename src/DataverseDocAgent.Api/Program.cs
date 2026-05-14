@@ -4,7 +4,10 @@
 
 using System.Threading.Channels;
 using System.Threading.RateLimiting;
+using Anthropic.SDK;
+using DataverseDocAgent.Api.Agent;
 using DataverseDocAgent.Api.Common;
+using DataverseDocAgent.Api.Features.DocumentGenerate;
 using DataverseDocAgent.Api.Features.SecurityCheck;
 using DataverseDocAgent.Shared.Dataverse;
 using DataverseDocAgent.Api.Jobs;
@@ -68,8 +71,24 @@ builder.Services.AddSingleton<IJobStore, InMemoryJobStore>();
 // not captured at module-load time. Prevents a stale, Complete()'d channel surviving
 // across WebApplicationFactory instances in tests.
 builder.Services.AddSingleton(_ => Channel.CreateUnbounded<GenerationTask>());
-builder.Services.AddSingleton<IGenerationPipeline, StubGenerationPipeline>();
+// Story 3.5 — DocumentGenerateService is the real pipeline; replaces StubGenerationPipeline.
+builder.Services.AddSingleton<IGenerationPipeline, DocumentGenerateService>();
 builder.Services.AddHostedService<GenerationBackgroundService>();
+
+// Story 3.5 — Anthropic client + orchestrator factory.
+// AnthropicClient is registered lazily so a missing key does not block startup —
+// the failure surfaces on first generation request as AI_ERROR, where it can be
+// observed and retried, rather than as a fatal host startup crash that blocks
+// the security-check endpoint (which has no Anthropic dependency).
+builder.Services.AddSingleton<AnthropicClient>(sp =>
+{
+    var apiKey = sp.GetRequiredService<IConfiguration>()["Anthropic:ApiKey"] ?? string.Empty;
+    return new AnthropicClient(apiKey);
+});
+builder.Services.AddSingleton<Func<AgentOrchestrator>>(sp => () =>
+    new AgentOrchestrator(
+        sp.GetRequiredService<AnthropicClient>(),
+        maxIterations: AgentOrchestrator.Mode1MaxIterations));
 
 // F-040, NFR-013 — Document store (Story 3.2, Phase 1).
 // IMemoryCache is itself a singleton; the store holds a reference to it, so the

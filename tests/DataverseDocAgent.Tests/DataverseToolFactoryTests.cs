@@ -8,16 +8,23 @@ namespace DataverseDocAgent.Tests;
 public class DataverseToolFactoryTests
 {
     [Fact]
-    public void CreateMode1Tools_ReturnsExactlyThreeNamedTools()
+    public void CreateMode1Tools_ReturnsExactlyFourNamedTools()
     {
         var svc = new Mock<IOrganizationService>().Object;
         var tools = DataverseToolFactory.CreateMode1Tools(svc);
 
         var names = tools.Select(t => t.Name).ToArray();
         // Exact-set assertion: a regression that swaps or drops a tool changes Mode 1's
-        // capability surface. Story 3.5's Mode 1 generation depends on these three.
+        // capability surface. Story 3.5 adds get_organisation_metadata as the 4th tool
+        // that drives the executive-summary section of the generated .docx (FR-011).
         Assert.Equal(
-            new[] { "list_custom_tables", "get_table_fields", "get_relationships" },
+            new[]
+            {
+                "list_custom_tables",
+                "get_table_fields",
+                "get_relationships",
+                "get_organisation_metadata",
+            },
             names);
     }
 

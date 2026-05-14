@@ -14,7 +14,19 @@ namespace DataverseDocAgent.Api.Agent;
 /// </summary>
 public sealed class AgentOrchestrator
 {
-    private const int MaxIterations = 10;
+    /// <summary>Default iteration ceiling used by the POC console host.</summary>
+    public const int DefaultMaxIterations = 10;
+
+    /// <summary>
+    /// Iteration ceiling for Mode 1 in the API host. Large environments with 50+
+    /// custom tables trigger 100+ tool calls (2 calls per table for fields and
+    /// relationships, plus organisation metadata + list_custom_tables) — the POC
+    /// limit of 10 is insufficient. 200 covers realistic environments with
+    /// headroom while still preventing runaway loops.
+    /// </summary>
+    public const int Mode1MaxIterations = 200;
+
+    private readonly int _maxIterations;
 
     /// <summary>
     /// Returned when the agent loop exhausts all iterations without reaching end_turn.
@@ -27,16 +39,20 @@ public sealed class AgentOrchestrator
 
     // ── Public constructor (production) ───────────────────────────────────────
 
-    public AgentOrchestrator(AnthropicClient client)
-        : this((p, ct) => client.Messages.GetClaudeMessageAsync(p, ct))
+    public AgentOrchestrator(AnthropicClient client, int maxIterations = DefaultMaxIterations)
+        : this((p, ct) => client.Messages.GetClaudeMessageAsync(p, ct), maxIterations)
     { }
 
     // ── Delegate constructor (testing / advanced DI) ──────────────────────────
 
     public AgentOrchestrator(
-        Func<MessageParameters, CancellationToken, Task<MessageResponse>> sendMessage)
+        Func<MessageParameters, CancellationToken, Task<MessageResponse>> sendMessage,
+        int maxIterations = DefaultMaxIterations)
     {
         _sendMessage = sendMessage ?? throw new ArgumentNullException(nameof(sendMessage));
+        if (maxIterations < 1)
+            throw new ArgumentOutOfRangeException(nameof(maxIterations), maxIterations, "must be >= 1");
+        _maxIterations = maxIterations;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -59,7 +75,7 @@ public sealed class AgentOrchestrator
             new() { Role = RoleType.User, Content = [new TextContent { Text = prompt }] },
         };
 
-        for (int iteration = 0; iteration < MaxIterations; iteration++)
+        for (int iteration = 0; iteration < _maxIterations; iteration++)
         {
             var parameters = new MessageParameters
             {
@@ -138,7 +154,7 @@ public sealed class AgentOrchestrator
         }
 
         // Max iterations reached — log warning and return sentinel
-        Console.Error.WriteLine($"[AgentOrchestrator] Warning: agent loop reached the maximum iteration limit ({MaxIterations}).");
+        Console.Error.WriteLine($"[AgentOrchestrator] Warning: agent loop reached the maximum iteration limit ({_maxIterations}).");
         return MaxIterationsSentinel;
     }
 

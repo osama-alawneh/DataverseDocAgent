@@ -12,10 +12,15 @@ namespace DataverseDocAgent.Api.Agent.Tools;
 public static class DataverseToolFactory
 {
     /// <summary>
-    /// Returns the three Mode 1 tools — <c>list_custom_tables</c>, <c>get_table_fields</c>,
-    /// <c>get_relationships</c> — bound to the supplied <paramref name="service"/>.
+    /// Returns the four Mode 1 tools — <c>list_custom_tables</c>, <c>get_table_fields</c>,
+    /// <c>get_relationships</c>, <c>get_organisation_metadata</c> — bound to the supplied
+    /// <paramref name="service"/>. <paramref name="environmentUrl"/> is woven into the
+    /// organisation metadata response because the Organization entity does not expose
+    /// the public environment URL.
     /// </summary>
-    public static IReadOnlyList<IDataverseTool> CreateMode1Tools(IOrganizationService service)
+    public static IReadOnlyList<IDataverseTool> CreateMode1Tools(
+        IOrganizationService service,
+        string? environmentUrl = null)
     {
         ArgumentNullException.ThrowIfNull(service);
         return new IDataverseTool[]
@@ -23,6 +28,7 @@ public static class DataverseToolFactory
             new ListCustomTablesTool(service),
             new GetTableFieldsTool(service),
             new GetRelationshipsTool(service),
+            new GetOrganisationMetadataTool(service, environmentUrl),
         };
     }
 }
