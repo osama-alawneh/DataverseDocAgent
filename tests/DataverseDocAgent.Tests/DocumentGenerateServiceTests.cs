@@ -124,6 +124,50 @@ public class DocumentGenerateServiceTests
         Assert.Null(parsed.ApplicationUsers);
     }
 
+    // E2E hotfix 2026-05-14 — pin the runtime hypothesis that drove the
+    // RateLimitsExceeded catch reordering in `RunAsync`. The Anthropic SDK
+    // makes `RateLimitsExceeded` derive from
+    // `System.Net.Http.HttpRequestException`; if a future SDK upgrade
+    // flips the base class, the network-fault filter no longer captures
+    // rate-limit 429s and the catch ordering can be reconsidered. This
+    // assertion is the single source of truth for the ordering invariant.
+    [Fact]
+    public void RateLimitsExceeded_DerivesFromHttpRequestException_PinsCatchOrdering()
+    {
+        Assert.True(
+            typeof(Anthropic.SDK.RateLimitsExceeded).IsSubclassOf(typeof(System.Net.Http.HttpRequestException)),
+            "Catch ordering in DocumentGenerateService.RunAsync depends on this hierarchy — "
+            + "if RateLimitsExceeded no longer derives from HttpRequestException, the dedicated "
+            + "Anthropic catch can be moved back below the network-fault filter without misclassification.");
+    }
+
+    // E2E hotfix 2026-05-14 — `TruncateForLog` bounds the forensic dump
+    // emitted when a Mode 1 JSON parse fails. Pin the head/tail/elision
+    // contract so a future "let's just log the whole response" regression
+    // is caught.
+    [Theory]
+    [InlineData(null,       "(empty)")]
+    [InlineData("",         "(empty)")]
+    [InlineData("short",    "short")]
+    public void TruncateForLog_SmallOrEmptyInput_PassesThrough(string? raw, string expected)
+    {
+        Assert.Equal(expected, DocumentGenerateService.TruncateForLog(raw, headChars: 5, tailChars: 5));
+    }
+
+    [Fact]
+    public void TruncateForLog_LongInput_EmitsHeadAndTailWithElisionMarker()
+    {
+        var raw = new string('a', 100) + new string('b', 200) + new string('c', 100);
+        var result = DocumentGenerateService.TruncateForLog(raw, headChars: 50, tailChars: 50);
+
+        Assert.StartsWith(new string('a', 50), result);
+        Assert.EndsWith(new string('c', 50),   result);
+        // 400 - 50 - 50 = 300 chars elided.
+        Assert.Contains("[300 chars elided]", result);
+        // Total log line bounded: head + tail + elision marker — no quadratic blow-up.
+        Assert.True(result.Length < raw.Length);
+    }
+
     // Story 3.7 code-review P9 — a Claude response with a wrong-shape
     // `applicationUsers` value (object / string instead of array) falls
     // outside the AC-11 defence-in-depth contract: the missing-key path is

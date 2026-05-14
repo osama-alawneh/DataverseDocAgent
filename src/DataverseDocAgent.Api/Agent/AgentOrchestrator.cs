@@ -80,7 +80,17 @@ public sealed class AgentOrchestrator
             var parameters = new MessageParameters
             {
                 Model     = AnthropicModels.Claude46Sonnet,
-                MaxTokens = 4096,
+                // E2E hotfix 2026-05-14 — 4096 was the POC default and
+                // truncated the Mode 1 final JSON for any realistic
+                // environment (50 tables × 10 fields easily exceeds the
+                // limit; Story 3.7's `applicationUsers` key tightened the
+                // budget further). Truncation surfaced downstream as
+                // AI_ERROR with inner JsonException because Claude's
+                // partial response is no longer valid JSON. Sonnet 4.6
+                // supports much higher output budgets; 16384 covers
+                // realistic Phase 1 environments with headroom and still
+                // bounds per-call cost.
+                MaxTokens = 16384,
                 Messages  = messages,
                 Tools     = sdkTools,
             };

@@ -98,6 +98,21 @@ public sealed class DocumentGenerateService : IGenerationPipeline
                         "Dataverse fault during environment scan.",
                         ex);
                 }
+                // E2E hotfix 2026-05-14 — `Anthropic.SDK.RateLimitsExceeded`
+                // derives from `System.Net.Http.HttpRequestException`. The
+                // network-fault filter below MUST sit AFTER this catch so
+                // Anthropic 429s aren't mis-labelled `DATAVERSE_ERROR`.
+                // Top-down catch resolution is the contract; type-ordering
+                // beats `when`-pattern-matching for readability.
+                catch (Anthropic.SDK.RateLimitsExceeded ex)
+                {
+                    outcome = JobFailureCodes.AiError;
+                    throw new GenerationFailureException(
+                        JobFailureCodes.AiError,
+                        safeToRetry: true,
+                        "Anthropic API rate limit exceeded.",
+                        ex);
+                }
                 catch (Exception ex) when (ex is TimeoutException
                                                 or CommunicationException
                                                 or System.Net.Http.HttpRequestException)
@@ -107,15 +122,6 @@ public sealed class DocumentGenerateService : IGenerationPipeline
                         JobFailureCodes.DataverseError,
                         safeToRetry: true,
                         "Network failure during environment scan.",
-                        ex);
-                }
-                catch (Anthropic.SDK.RateLimitsExceeded ex)
-                {
-                    outcome = JobFailureCodes.AiError;
-                    throw new GenerationFailureException(
-                        JobFailureCodes.AiError,
-                        safeToRetry: true,
-                        "Anthropic API rate limit exceeded.",
                         ex);
                 }
                 catch (Exception ex)
@@ -166,7 +172,32 @@ public sealed class DocumentGenerateService : IGenerationPipeline
         }
 
         // ── Parse Claude JSON ─────────────────────────────────────────────────
-        var parsed = ParseAgentJson(rawResponse);
+        AgentJsonModel parsed;
+        try
+        {
+            parsed = ParseAgentJson(rawResponse);
+        }
+        catch (GenerationFailureException ex)
+            when (ex.Code == JobFailureCodes.AiError && ex.InnerException is JsonException jex)
+        {
+            // E2E hotfix 2026-05-14 — emit a forensic head+tail of Claude's
+            // raw response (with the JsonException line/byte offsets) so the
+            // next AI_ERROR (JsonException) failure leaves a diagnosable
+            // trail. NFR-007 holds: the orchestrator never sends credentials
+            // to Claude (only the Mode 1 prompt + tool schemas; per
+            // AgentOrchestrator.RunAsync), so the response cannot echo any
+            // secret the tool didn't put there itself — and the tool surface
+            // (5 Mode 1 tools) only emits public Dataverse metadata.
+            var safe = TruncateForLog(rawResponse, headChars: 2000, tailChars: 500);
+            _logger.LogWarning(
+                "Mode 1 JSON parse failed (line={Line}, byte={Byte}, total={Total} chars); "
+                + "raw head+tail: {RawSnippet}",
+                jex.LineNumber,
+                jex.BytePositionInLine,
+                rawResponse?.Length ?? 0,
+                safe);
+            throw;
+        }
 
         // ── Deterministic enrichment ──────────────────────────────────────────
         var tableCount        = parsed.Tables?.Count ?? 0;
@@ -319,6 +350,23 @@ public sealed class DocumentGenerateService : IGenerationPipeline
         }
 
         return s;
+    }
+
+    // E2E hotfix 2026-05-14 — bounded forensic dump for Mode 1 JSON parse
+    // failures. Head + tail covers the two most common Claude failure modes:
+    // (a) a malformed preamble (markdown fence, prose lead-in) at the head,
+    // (b) a max-tokens truncation at the tail. Centre is collapsed to a
+    // length marker so the log line stays bounded regardless of response
+    // size. Never invoked outside the logging catch — pure helper.
+    internal static string TruncateForLog(string? raw, int headChars, int tailChars)
+    {
+        if (string.IsNullOrEmpty(raw))            return "(empty)";
+        if (raw.Length <= headChars + tailChars)  return raw;
+        var elided = raw.Length - headChars - tailChars;
+        return string.Concat(
+            raw.AsSpan(0, headChars),
+            $"… [{elided} chars elided] …",
+            raw.AsSpan(raw.Length - tailChars, tailChars));
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<T>> CoerceDict<T>(
