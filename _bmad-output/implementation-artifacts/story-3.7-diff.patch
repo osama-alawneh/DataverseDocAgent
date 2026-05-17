@@ -1,0 +1,1266 @@
+diff --git a/_bmad-output/implementation-artifacts/deferred-work.md b/_bmad-output/implementation-artifacts/deferred-work.md
+index 44db267..c73a39c 100644
+--- a/_bmad-output/implementation-artifacts/deferred-work.md
++++ b/_bmad-output/implementation-artifacts/deferred-work.md
+@@ -1,5 +1,9 @@
+ # Deferred Work
+ 
++## Deferred from: story-3.7 dev (2026-05-14)
++
++- **`SecurityCheckService.RequiredPrivileges` not aligned with PRD §5.4's new `SystemUser | Read` row.** Story 3.7's Dev Notes (recommended option 1) ask both `docs/prd.md` §5.4 AND `SecurityCheckService.RequiredPrivileges` to be updated in the same commit. The PRD row was added; the service-side list was NOT, because adding `"Read SystemUser"` would require updating six existing test assertions in `SecurityCheckServiceTests` (`RequiredPrivileges_HasExactly12Entries` → 13; `ComputePrivilegeSets_AllPresent_EmptyMissingAndExtra` 12 → 13; `ComputePrivilegeSets_OneMissing_DetectedInMissing` 11 → 12; `ComputePrivilegeSets_SharePointBaseline_NotReportedInExtra` 12 → 13; `ComputePrivilegeSets_CaseInsensitive_RequiredMatch` 12 → 13) plus a new `[InlineData("prvReadSystemUser", "Read SystemUser")]` row in `MapPrivilegeName_Read_MapsCorrectly`. The handoff prompt for the autonomous run capped diversions outside the story's "Files modified" list to "a single inline-data row addition" and instructed STOP-and-defer beyond that. In practice the tool is unaffected because `prvReadSystemUser` is auto-granted to every service-account role via Dataverse's Basic User membership (SecurityCheckService.cs line 99-100 documents this rationale for the historic deliberate exclusion). Fix path: bump the literal `12` count assertions to `13`, add the InlineData row, and add `"Read SystemUser"` to the `RequiredPrivileges` array. Single-file impact: `src/DataverseDocAgent.Api/Features/SecurityCheck/SecurityCheckService.cs` + `tests/DataverseDocAgent.Tests/SecurityCheckServiceTests.cs`.
++
+ ## Deferred from: code review of story-3.6 (2026-05-14)
+ 
+ - **`PrefixAnalyzer` Microsoft `cr` regex over-matches real ISV prefixes.** `^cr[a-z0-9]*$` swallows any prefix starting with `cr` and containing only `[a-z0-9]` — e.g. `crm_`, `crystal_`, `cradius_`, `crew_`. AC-2 of the story explicitly accepts this over-match (the bucket rule is intentional, not defective) on the basis that real-world Power Apps default-environment auto-prefixes (`cr3a7_`, `crf2b_`) are the dominant `cr*` case and an ISV picking `crm_` is a documented edge case. The current behaviour is contract-locked by `Analyze_BucketsMicrosoftPrefixes` (`crm_widget` and `crystal_thing` are pinned as Microsoft). Revisit if a real customer environment exposes the over-match (e.g. a `crm_*` ISV solution gets visibly mis-bucketed); the tightening path is `^cr[a-f0-9]{3,4}$` (PowerApps default-environment prefix shape).
+diff --git a/_bmad-output/implementation-artifacts/sprint-status.yaml b/_bmad-output/implementation-artifacts/sprint-status.yaml
+index 35d8c6f..cb39faa 100644
+--- a/_bmad-output/implementation-artifacts/sprint-status.yaml
++++ b/_bmad-output/implementation-artifacts/sprint-status.yaml
+@@ -35,7 +35,7 @@
+ # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+ 
+ generated: 2026-04-13
+-last_updated: 2026-05-14 (story 3-6 publisher-prefix-intelligence → done)
++last_updated: 2026-05-14 (story 3-7 application-user-inventory → review)
+ project: DataverseDocAgent
+ project_key: NOKEY
+ tracking_system: file-system
+@@ -67,6 +67,6 @@ development_status:
+   3-4-dataverse-tools-tables-fields-relationships: done
+   3-5-mode-1-post-api-document-generate-endpoint-and-full-request-to-download-flow: done
+   3-6-publisher-prefix-intelligence: done
+-  3-7-application-user-inventory: ready-for-dev
++  3-7-application-user-inventory: review
+   3-8-dataverse-connection-factory-consolidation: done
+   epic-3-retrospective: optional
+diff --git a/_bmad-output/implementation-artifacts/story-3.7-application-user-inventory.md b/_bmad-output/implementation-artifacts/story-3.7-application-user-inventory.md
+index 2901b1e..e4db5f8 100644
+--- a/_bmad-output/implementation-artifacts/story-3.7-application-user-inventory.md
++++ b/_bmad-output/implementation-artifacts/story-3.7-application-user-inventory.md
+@@ -1,6 +1,6 @@
+ # Story 3.7: Application User Inventory
+ 
+-Status: ready-for-dev
++Status: review
+ 
+ <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
+ 
+@@ -27,43 +27,43 @@ so that I can identify which external integrations are writing to this environme
+ 
+ ## Tasks / Subtasks
+ 
+-- [ ] Implement `GetApplicationUsersTool` (AC: 1, 2, 3, 4, 5)
+-  - [ ] Create `src/DataverseDocAgent.Api/Agent/Tools/GetApplicationUsersTool.cs`
+-  - [ ] Constructor takes `IOrganizationService` only — same shape as siblings; no environment URL needed.
+-  - [ ] First query: `QueryExpression` against `systemuser` with `ColumnSet("fullname", "applicationid", "internalemailaddress")` and filter `isdisabled = false AND islicensed = false AND applicationid != null`. Use `_service.RetrieveMultiple(query)` synchronously (matches Story 3.4 / 3.5 pattern; sync-SDK limitation already in deferred-work.md).
+-  - [ ] For each result `Entity`, build a per-user role list via a second `QueryExpression` against `systemuserroles` linked to `role`: link-entity from `systemuserroles.roleid → role.roleid`, filter `systemuserroles.systemuserid = <currentUserId>`, columns `role.name`. Try/catch around this per-user query — on any `FaultException<OrganizationServiceFault>`, `TimeoutException`, `CommunicationException`, or `HttpRequestException`, set the user's role list to `[ "(role lookup unavailable)" ]` and continue.
+-  - [ ] `OperationCanceledException` from either query MUST propagate (do NOT swallow inside the per-user catch; use `when` clauses to exclude OCE — matches `ListCustomTablesTool` precedent).
+-  - [ ] Outer try/catch on the initial `systemuser` query returns the structured `{ "error": "Failed to list application users" }` JSON for SDK faults / timeouts / WCF channel faults (matches sibling tools).
+-  - [ ] Annotate file header: `// F-055 — FR-050 — Integration Signal Detection: App User Inventory (Story 3.7)`. Add `// NFR-007` inline at the per-user role-lookup catch block to pin the no-message-leak intent.
+-- [ ] Wire the tool into `DataverseToolFactory` (AC: 6)
+-  - [ ] Append `new GetApplicationUsersTool(service)` as the 5th element of the array returned by `CreateMode1Tools`.
+-  - [ ] Update `DataverseToolFactoryTests.CreateMode1Tools_ReturnsExactlyFourNamedTools` → rename to `_ReturnsExactlyFiveNamedTools` and assert the new tool name in the trailing slot.
+-- [ ] Extend `PromptBuilder.BuildMode1Prompt()` (AC: 7)
+-  - [ ] Add step `5.` "Call `get_application_users` once to retrieve every application user (non-human integration principal) registered in the environment."
+-  - [ ] Add `applicationUsers` key to the prescribed JSON shape with the four fields per AC-7.
+-  - [ ] Add the "Pass the role array through verbatim" rule alongside the existing rules block.
+-  - [ ] Update `PromptBuilderTests` to assert `get_application_users` and the `applicationUsers` output key are mentioned.
+-- [ ] Extend the document model (AC: 8)
+-  - [ ] Add `ApplicationUserInfo` sealed class in `src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs`.
+-  - [ ] Add `required IReadOnlyList<ApplicationUserInfo> ApplicationUsers { get; init; }` at the top level of `GeneratedDocumentModel` (peer to `Tables`/`Fields`/`Relationships`, not nested under `Summary`).
+-  - [ ] Update Story 3.5 `BuildSampleModel` in `DocxBuilderTests` to set the new field — flag this as the breaking-test fix in the PR.
+-- [ ] Parse the new section in `DocumentGenerateService` (AC: 11)
+-  - [ ] Extend the internal `AgentJsonModel` DTO with `List<ApplicationUserInfo>? ApplicationUsers { get; set; }`.
+-  - [ ] In `RunPipelineAsync`, pass `(IReadOnlyList<ApplicationUserInfo>?)parsed.ApplicationUsers ?? Array.Empty<ApplicationUserInfo>()` into the model build. Defence-in-depth: a Claude response that drops the `applicationUsers` key is rendered as the "no users" section, not as an AI_ERROR.
+-- [ ] Render Section 5 in `DocxBuilder` (AC: 9, 10)
+-  - [ ] New private helper `AppendApplicationUsersSection(body, applicationUsers)`.
+-  - [ ] Skip rendering only when `model.Tables.Count == 0 && model.ApplicationUsers.Count == 0` (AC-10 "always present unless the document is otherwise empty").
+-  - [ ] H1 heading exactly `"5. Application Users (Integration Signals)"`.
+-  - [ ] Always render the FR-050 literal prose paragraph (single sentence per AC-9).
+-  - [ ] If `applicationUsers.Count == 0`: render the literal sentence `"No application users registered in this environment."` and return.
+-  - [ ] Otherwise: render a `BuildTable` with headers `[ "Display Name", "Application ID", "Roles" ]` and one row per user. Roles joined with `", "`; empty roles list renders as the literal `"(no roles assigned)"` so the cell is never blank.
+-  - [ ] Call the helper at the end of `AppendRelationshipMapSection`'s sibling slot inside `Build`, after `AppendRelationshipMapSection(body, model.Tables, model.Relationships)`.
+-- [ ] Tests (AC: 12)
+-  - [ ] Create `tests/DataverseDocAgent.Tests/GetApplicationUsersToolTests.cs` covering the four scenarios in AC-12 against a mocked `IOrganizationService`. Mock `_service.RetrieveMultiple` to return a controlled `EntityCollection`; for per-user role queries match by linked-entity filter so different mocked responses can be returned per user.
+-  - [ ] Extend `tests/DataverseDocAgent.Tests/DataverseToolFactoryTests.cs` per AC-6.
+-  - [ ] Extend `tests/DataverseDocAgent.Tests/PromptBuilderTests.cs` per AC-7.
+-  - [ ] Extend `tests/DataverseDocAgent.Tests/DocxBuilderTests.cs` with two new tests: populated section + empty-list section. Both assert the literal FR-050 prose and (for populated) the three-column table.
+-  - [ ] Extend `tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs` to cover the missing-key defence (AC-11).
++- [x] Implement `GetApplicationUsersTool` (AC: 1, 2, 3, 4, 5)
++  - [x] Create `src/DataverseDocAgent.Api/Agent/Tools/GetApplicationUsersTool.cs`
++  - [x] Constructor takes `IOrganizationService` only — same shape as siblings; no environment URL needed.
++  - [x] First query: `QueryExpression` against `systemuser` with `ColumnSet("fullname", "applicationid", "internalemailaddress")` and filter `isdisabled = false AND islicensed = false AND applicationid != null`. Use `_service.RetrieveMultiple(query)` synchronously (matches Story 3.4 / 3.5 pattern; sync-SDK limitation already in deferred-work.md).
++  - [x] For each result `Entity`, build a per-user role list via a second `QueryExpression` against `systemuserroles` linked to `role`: link-entity from `systemuserroles.roleid → role.roleid`, filter `systemuserroles.systemuserid = <currentUserId>`, columns `role.name`. Try/catch around this per-user query — on any `FaultException<OrganizationServiceFault>`, `TimeoutException`, `CommunicationException`, or `HttpRequestException`, set the user's role list to `[ "(role lookup unavailable)" ]` and continue.
++  - [x] `OperationCanceledException` from either query MUST propagate (do NOT swallow inside the per-user catch; use `when` clauses to exclude OCE — matches `ListCustomTablesTool` precedent).
++  - [x] Outer try/catch on the initial `systemuser` query returns the structured `{ "error": "Failed to list application users" }` JSON for SDK faults / timeouts / WCF channel faults (matches sibling tools).
++  - [x] Annotate file header: `// F-055 — FR-050 — Integration Signal Detection: App User Inventory (Story 3.7)`. Add `// NFR-007` inline at the per-user role-lookup catch block to pin the no-message-leak intent.
++- [x] Wire the tool into `DataverseToolFactory` (AC: 6)
++  - [x] Append `new GetApplicationUsersTool(service)` as the 5th element of the array returned by `CreateMode1Tools`.
++  - [x] Update `DataverseToolFactoryTests.CreateMode1Tools_ReturnsExactlyFourNamedTools` → rename to `_ReturnsExactlyFiveNamedTools` and assert the new tool name in the trailing slot.
++- [x] Extend `PromptBuilder.BuildMode1Prompt()` (AC: 7)
++  - [x] Add step `5.` "Call `get_application_users` once to retrieve every application user (non-human integration principal) registered in the environment."
++  - [x] Add `applicationUsers` key to the prescribed JSON shape with the four fields per AC-7.
++  - [x] Add the "Pass the role array through verbatim" rule alongside the existing rules block.
++  - [x] Update `PromptBuilderTests` to assert `get_application_users` and the `applicationUsers` output key are mentioned.
++- [x] Extend the document model (AC: 8)
++  - [x] Add `ApplicationUserInfo` sealed class in `src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs`.
++  - [x] Add `required IReadOnlyList<ApplicationUserInfo> ApplicationUsers { get; init; }` at the top level of `GeneratedDocumentModel` (peer to `Tables`/`Fields`/`Relationships`, not nested under `Summary`).
++  - [x] Update Story 3.5 `BuildSampleModel` in `DocxBuilderTests` to set the new field — flag this as the breaking-test fix in the PR.
++- [x] Parse the new section in `DocumentGenerateService` (AC: 11)
++  - [x] Extend the internal `AgentJsonModel` DTO with `List<ApplicationUserInfo>? ApplicationUsers { get; set; }`.
++  - [x] In `RunPipelineAsync`, pass `(IReadOnlyList<ApplicationUserInfo>?)parsed.ApplicationUsers ?? Array.Empty<ApplicationUserInfo>()` into the model build. Defence-in-depth: a Claude response that drops the `applicationUsers` key is rendered as the "no users" section, not as an AI_ERROR.
++- [x] Render Section 5 in `DocxBuilder` (AC: 9, 10)
++  - [x] New private helper `AppendApplicationUsersSection(body, applicationUsers)`.
++  - [x] Skip rendering only when `model.Tables.Count == 0 && model.ApplicationUsers.Count == 0` (AC-10 "always present unless the document is otherwise empty").
++  - [x] H1 heading exactly `"5. Application Users (Integration Signals)"`.
++  - [x] Always render the FR-050 literal prose paragraph (single sentence per AC-9).
++  - [x] If `applicationUsers.Count == 0`: render the literal sentence `"No application users registered in this environment."` and return.
++  - [x] Otherwise: render a `BuildTable` with headers `[ "Display Name", "Application ID", "Roles" ]` and one row per user. Roles joined with `", "`; empty roles list renders as the literal `"(no roles assigned)"` so the cell is never blank.
++  - [x] Call the helper at the end of `AppendRelationshipMapSection`'s sibling slot inside `Build`, after `AppendRelationshipMapSection(body, model.Tables, model.Relationships)`.
++- [x] Tests (AC: 12)
++  - [x] Create `tests/DataverseDocAgent.Tests/GetApplicationUsersToolTests.cs` covering the four scenarios in AC-12 against a mocked `IOrganizationService`. Mock `_service.RetrieveMultiple` to return a controlled `EntityCollection`; for per-user role queries match by linked-entity filter so different mocked responses can be returned per user.
++  - [x] Extend `tests/DataverseDocAgent.Tests/DataverseToolFactoryTests.cs` per AC-6.
++  - [x] Extend `tests/DataverseDocAgent.Tests/PromptBuilderTests.cs` per AC-7.
++  - [x] Extend `tests/DataverseDocAgent.Tests/DocxBuilderTests.cs` with two new tests: populated section + empty-list section. Both assert the literal FR-050 prose and (for populated) the three-column table.
++  - [x] Extend `tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs` to cover the missing-key defence (AC-11).
+ 
+ ## Dev Notes
+ 
+@@ -118,10 +118,42 @@ No new csproj packages required.
+ 
+ ### Agent Model Used
+ 
+-claude-sonnet-4-6
++claude-opus-4-7
+ 
+ ### Debug Log References
+ 
++- 2026-05-14 dev — first `dotnet test` pass after fixture changes failed `Build_ApplicationUsersSection_EmptyList_PopulatedEnvironment_RendersHeadingAndFallbackProse` because `BuildModelWithApplicationUsers` hard-coded `Tables = Array.Empty<TableInfo>()` while exercising `tableCount > 0`. `AppendApplicationUsersSection` (correctly) gates on `model.Tables.Count`, not the summary counter, so the section was suppressed. Fix: helper now synthesises a placeholder `TableInfo` per `tableCount` so the AC-10 "populated environment" branch is reached. All 247 tests pass after the fix.
++
+ ### Completion Notes List
+ 
++- Implemented `GetApplicationUsersTool` as the 5th Mode 1 tool. JSON output keys (`displayName`, `applicationId`, `email`, `roles`) deliberately mirror the Claude-output shape so AC-7's "pass the role array through verbatim" rule is a no-op rename rather than a per-key remap.
++- Per-user role isolation: try/catch around the secondary `QueryExpression` swallows only `FaultException<OrganizationServiceFault>` / `TimeoutException` / `CommunicationException` / `HttpRequestException`; `OperationCanceledException` propagates via `when (cancellationToken.IsCancellationRequested)` filter so the orchestrator's cancellation contract is intact.
++- Sentinel `(role lookup unavailable)` exposed via `GetApplicationUsersTool.RoleLookupUnavailableSentinel` `public const string` so both the analyzer-style consumer (tests) and any future renderer can reference the literal without drift.
++- `GeneratedDocumentModel.ApplicationUsers` is `required` at the top level — peer to `Tables` / `Fields` / `Relationships`, NOT nested under `Summary`. Story 3.6's `ExecutiveSummary.PrefixSummary` precedent influenced this choice but Section 5 is rendered post-Section-4 (Technical Reference Layer per FR-050 / ADR-007), so a top-level slot keeps the executive-summary boundary clean.
++- `DocumentGenerateService.AgentJsonModel.ApplicationUsers` is optional (nullable). A backwards-compatible four-key Claude response from Story 3.5 deserialises with `ApplicationUsers == null` and the safe-coalesce (`?.Where(u => u is not null).ToList() ?? Array.Empty<ApplicationUserInfo>()`) renders the empty Section 5 instead of raising `AI_ERROR`. Mirrors Story 3.6 P2 null-entry filter at the parse boundary.
++- `DocxBuilder.AppendApplicationUsersSection` is suppressed only when both `model.Tables.Count == 0` AND `model.ApplicationUsers.Count == 0` (AC-10 "nothing else in the document either"). Headers always present whenever either collection is non-empty; the literal "No application users registered…" sentence covers the empty-list branch.
++- PRD §5.4 row added (`SystemUser | Read | ... | Never`) per story Dev Notes recommended option 1. **Note:** `SecurityCheckService.RequiredPrivileges` was NOT updated in this commit — adding `Read SystemUser` would require updating 6+ test count assertions (12 → 13 across `RequiredPrivileges_HasExactly12Entries`, `ComputePrivilegeSets_*`, etc.) plus a new `[InlineData("prvReadSystemUser", "Read SystemUser")]` row. The handoff prompt explicitly capped diversions to "a single inline-data row addition" and instructed STOP-and-defer otherwise. The mismatch between PRD §5.4 (now 13 rows) and `SecurityCheckService.RequiredPrivileges` (still 12 entries) is intentionally deferred to a follow-up commit and documented in `deferred-work.md`.
++- Tests: 247 pass (was 230 pre-story). New: 9 `GetApplicationUsersToolTests` cases + 4 `DocxBuilderTests` Section-5 branches + 1 `PromptBuilderTests` assertion + 1 `DataverseToolFactoryTests` rename (with trailing-slot pin) + 2 `DocumentGenerateServiceTests` (missing-key defence + null-entry filter).
++
+ ### File List
++
++- `src/DataverseDocAgent.Api/Agent/Tools/GetApplicationUsersTool.cs` (new)
++- `src/DataverseDocAgent.Api/Agent/Tools/DataverseToolFactory.cs` (modified — 5th tool registered, XML doc reflects new count)
++- `src/DataverseDocAgent.Api/Agent/PromptBuilder.cs` (modified — step 5 + `applicationUsers` JSON key + role-passthrough rule)
++- `src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs` (modified — `ApplicationUserInfo` + required `ApplicationUsers` top-level slot)
++- `src/DataverseDocAgent.Api/Documents/DocxBuilder.cs` (modified — `AppendApplicationUsersSection` helper + call-site in `Build`)
++- `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs` (modified — `AgentJsonModel.ApplicationUsers` + safe-coalesce + null-entry filter in `RunPipelineAsync`)
++- `tests/DataverseDocAgent.Tests/GetApplicationUsersToolTests.cs` (new)
++- `tests/DataverseDocAgent.Tests/DataverseToolFactoryTests.cs` (modified — renamed test asserts 5 named tools in canonical order)
++- `tests/DataverseDocAgent.Tests/PromptBuilderTests.cs` (modified — 5th tool + `applicationUsers` key + verbatim-passthrough rule)
++- `tests/DataverseDocAgent.Tests/DocxBuilderTests.cs` (modified — 4 Section-5 branches + `BuildSampleModel` + empty-environment fixtures updated for required init)
++- `tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs` (modified — missing-key defence + null-entry filter tests)
++- `docs/prd.md` (modified — §5.4 `SystemUser | Read | ... | Never` row added per Dev Notes option 1)
++- `_bmad-output/implementation-artifacts/sprint-status.yaml` (modified — story 3-7 → review)
++- `_bmad-output/implementation-artifacts/story-3.7-application-user-inventory.md` (modified — task checkboxes, Dev Agent Record, status)
++
++### Change Log
++
++| Date       | Change                                                                       |
++|------------|------------------------------------------------------------------------------|
++| 2026-05-14 | Story 3.7 implemented — `GetApplicationUsersTool` + Section 5 (Application Users — Integration Signals); 247 tests pass. PRD §5.4 SystemUser row added; SecurityCheckService alignment deferred per handoff cap. |
+diff --git a/docs/prd.md b/docs/prd.md
+index ddbfa33..5d43d57 100644
+--- a/docs/prd.md
++++ b/docs/prd.md
+@@ -412,6 +412,7 @@ Published to customers before they connect their first environment. Goal: a lock
+ | SystemForm | Read | Read form definitions for JavaScript registration map | Never |
+ | SavedQuery (View) | Read | Read view definitions for field impact analysis. Privilege name is `prvReadQuery` — Dataverse drops the "Saved" prefix on the privilege while keeping it on the entity | Never |
+ | Organization | Read | Read basic environment metadata for report header | Never |
++| SystemUser | Read | List application users for integration signal detection (FR-050) — surfaces non-human integration principals along with their assigned roles | Never |
+ 
+ > **Note on SharePoint baseline privileges:** In environments with SharePoint Document Management Integration enabled, Dataverse auto-grants `prvCreateSharePointData`, `prvReadSharePointData`, `prvWriteSharePointData`, and `prvReadSharePointDocument` to every security role and refuses manual removal. The permission checker treats these as harmless baseline and does not surface them as `extra[]`. The tool never reads or writes SharePoint entities.
+ 
+diff --git a/src/DataverseDocAgent.Api/Agent/PromptBuilder.cs b/src/DataverseDocAgent.Api/Agent/PromptBuilder.cs
+index 347f660..56e4a45 100644
+--- a/src/DataverseDocAgent.Api/Agent/PromptBuilder.cs
++++ b/src/DataverseDocAgent.Api/Agent/PromptBuilder.cs
+@@ -30,6 +30,8 @@ public static class PromptBuilder
+              with that table's logical name to retrieve its custom attributes.
+           4. For each custom table returned in step 2, call `get_relationships`
+              with that table's logical name to retrieve its custom relationships.
++          5. Call `get_application_users` once to retrieve every application user
++             (non-human integration principal) registered in the environment.
+ 
+         Once all tool calls are complete, return your FINAL response as a single
+         JSON object only — no surrounding text and no markdown code fences. The
+@@ -61,6 +63,10 @@ public static class PromptBuilder
+                 "businessMeaning": "<short AI-inferred description|null>" }
+             ]
+           },
++          "applicationUsers": [
++            { "displayName": "<string|null>", "applicationId": "<string|null>",
++              "email": "<string|null>", "roles": ["<role display name>"] }
++          ],
+           "keyObservations": [
+             "<3 to 5 plain-English observations about the environment>"
+           ]
+@@ -77,5 +83,8 @@ public static class PromptBuilder
+             return.
+           - If a tool returns an `error` field, skip that table for the affected
+             section rather than fabricating data.
++          - Pass the role array through verbatim — do not redact or summarise role
++            names returned by `get_application_users`. If the tool reports the
++            sentinel "(role lookup unavailable)" for a user, preserve it exactly.
+         """;
+ }
+diff --git a/src/DataverseDocAgent.Api/Agent/Tools/DataverseToolFactory.cs b/src/DataverseDocAgent.Api/Agent/Tools/DataverseToolFactory.cs
+index 6de58a8..3017f82 100644
+--- a/src/DataverseDocAgent.Api/Agent/Tools/DataverseToolFactory.cs
++++ b/src/DataverseDocAgent.Api/Agent/Tools/DataverseToolFactory.cs
+@@ -1,4 +1,5 @@
+ // F-001, F-002, F-003 — Story 3.4 Mode 1 tool registration
++// F-055 — Story 3.7 added GetApplicationUsersTool as the 5th Mode 1 tool
+ using Microsoft.Xrm.Sdk;
+ 
+ namespace DataverseDocAgent.Api.Agent.Tools;
+@@ -12,11 +13,11 @@ namespace DataverseDocAgent.Api.Agent.Tools;
+ public static class DataverseToolFactory
+ {
+     /// <summary>
+-    /// Returns the four Mode 1 tools — <c>list_custom_tables</c>, <c>get_table_fields</c>,
+-    /// <c>get_relationships</c>, <c>get_organisation_metadata</c> — bound to the supplied
+-    /// <paramref name="service"/>. <paramref name="environmentUrl"/> is woven into the
+-    /// organisation metadata response because the Organization entity does not expose
+-    /// the public environment URL.
++    /// Returns the five Mode 1 tools — <c>list_custom_tables</c>, <c>get_table_fields</c>,
++    /// <c>get_relationships</c>, <c>get_organisation_metadata</c>, <c>get_application_users</c> —
++    /// bound to the supplied <paramref name="service"/>. <paramref name="environmentUrl"/> is
++    /// woven into the organisation metadata response because the Organization entity does not
++    /// expose the public environment URL.
+     /// </summary>
+     public static IReadOnlyList<IDataverseTool> CreateMode1Tools(
+         IOrganizationService service,
+@@ -29,6 +30,7 @@ public static class DataverseToolFactory
+             new GetTableFieldsTool(service),
+             new GetRelationshipsTool(service),
+             new GetOrganisationMetadataTool(service, environmentUrl),
++            new GetApplicationUsersTool(service),
+         };
+     }
+ }
+diff --git a/src/DataverseDocAgent.Api/Agent/Tools/GetApplicationUsersTool.cs b/src/DataverseDocAgent.Api/Agent/Tools/GetApplicationUsersTool.cs
+new file mode 100644
+index 0000000..e287047
+--- /dev/null
++++ b/src/DataverseDocAgent.Api/Agent/Tools/GetApplicationUsersTool.cs
+@@ -0,0 +1,196 @@
++// F-055 — FR-050 — Integration Signal Detection: App User Inventory (Story 3.7)
++using System.Net.Http;
++using System.ServiceModel;
++using System.Text.Json;
++using System.Text.Json.Serialization;
++using Microsoft.Xrm.Sdk;
++using Microsoft.Xrm.Sdk.Query;
++
++namespace DataverseDocAgent.Api.Agent.Tools;
++
++/// <summary>
++/// Lists every application (non-human integration) user registered in the
++/// connected environment, along with the security-role names assigned to each.
++/// Definition of an application user (per FR-050): a <c>SystemUser</c> row whose
++/// <c>isdisabled = false</c>, <c>islicensed = false</c>, and <c>applicationid</c>
++/// is populated. The per-user role list is built by a secondary
++/// <c>QueryExpression</c> against <c>systemuserroles</c> joined to <c>role</c>;
++/// failures of that secondary query are isolated per user so a single bad row
++/// cannot poison the whole result — the bad user is surfaced with the sentinel
++/// <c>["(role lookup unavailable)"]</c> rather than an empty array, so the
++/// renderer can distinguish "no roles" from "lookup failed".
++/// Any outer SDK fault (the initial <c>SystemUser</c> query itself) is
++/// converted into the sibling-tool error shape <c>{ "error": "Failed to list
++/// application users" }</c> so the agent loop receives a tool result rather
++/// than an exception (NFR-007 / sibling-tool contract from Story 3.4 / 3.5).
++/// </summary>
++public sealed class GetApplicationUsersTool : IDataverseTool
++{
++    public const string RoleLookupUnavailableSentinel = "(role lookup unavailable)";
++
++    private readonly IOrganizationService _service;
++
++    private static readonly JsonElement s_inputSchema =
++        JsonSerializer.Deserialize<JsonElement>("""{"type":"object","properties":{}}""");
++
++    private static readonly JsonSerializerOptions s_jsonOptions = new()
++    {
++        PropertyNamingPolicy   = JsonNamingPolicy.CamelCase,
++        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
++    };
++
++    public GetApplicationUsersTool(IOrganizationService service)
++    {
++        _service = service ?? throw new ArgumentNullException(nameof(service));
++    }
++
++    public string      Name        => "get_application_users";
++    public string      Description =>
++        "Returns all application (non-human, integration) users registered in the environment "
++        + "along with their assigned security roles.";
++    public JsonElement InputSchema => s_inputSchema;
++
++    public Task<string> ExecuteAsync(JsonElement input, CancellationToken cancellationToken = default)
++    {
++        cancellationToken.ThrowIfCancellationRequested();
++
++        try
++        {
++            var users = FetchApplicationUsers();
++            var dtos  = new List<ApplicationUserDto>(users.Count);
++            foreach (var user in users)
++            {
++                cancellationToken.ThrowIfCancellationRequested();
++                dtos.Add(BuildDto(user, cancellationToken));
++            }
++            return Task.FromResult(JsonSerializer.Serialize(
++                new { applicationUsers = dtos }, s_jsonOptions));
++        }
++        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
++        {
++            // Caller cancellation must short-circuit, not be sanitized into a tool result —
++            // otherwise the orchestrator's cancellation contract is silently broken.
++            throw;
++        }
++        catch (Exception ex) when (ex is FaultException<OrganizationServiceFault>
++                                       or TimeoutException
++                                       or CommunicationException
++                                       or HttpRequestException)
++        {
++            // NFR-007 / sibling-tool contract — never let raw SDK fault text reach
++            // Claude. Structured JSON keeps the agent loop alive and lets the
++            // orchestrator continue with the rest of the Mode 1 plan.
++            return Task.FromResult(JsonSerializer.Serialize(
++                new { error = "Failed to list application users" }, s_jsonOptions));
++        }
++    }
++
++    // ── Internals ─────────────────────────────────────────────────────────────
++
++    private IReadOnlyList<Entity> FetchApplicationUsers()
++    {
++        // FR-050 definition of an application user. `isdisabled = false` is a
++        // defensive extension (disabled app users are stale registrations and
++        // should not be flagged as live integration signals — see story Dev Notes).
++        var query = new QueryExpression("systemuser")
++        {
++            ColumnSet = new ColumnSet("systemuserid", "fullname", "applicationid", "internalemailaddress"),
++        };
++        query.Criteria.AddCondition("isdisabled",    ConditionOperator.Equal,    false);
++        query.Criteria.AddCondition("islicensed",    ConditionOperator.Equal,    false);
++        query.Criteria.AddCondition("applicationid", ConditionOperator.NotNull);
++
++        var result = _service.RetrieveMultiple(query);
++        return result?.Entities is null ? Array.Empty<Entity>() : (IReadOnlyList<Entity>)result.Entities;
++    }
++
++    private ApplicationUserDto BuildDto(Entity user, CancellationToken cancellationToken)
++    {
++        // Tool-output JSON keys deliberately mirror the Claude-output shape
++        // described in PromptBuilder (`displayName`, `applicationId`, `email`,
++        // `roles`) so Claude can "pass the role array through verbatim" per
++        // AC-7's prompt rule. The Dataverse source attributes are still the
++        // canonical SDK names (`fullname`, `applicationid`,
++        // `internalemailaddress`) per AC-3.
++        var dto = new ApplicationUserDto
++        {
++            DisplayName   = user.GetAttributeValue<string?>("fullname"),
++            ApplicationId = ExtractApplicationId(user),
++            Email         = NullIfBlank(user.GetAttributeValue<string?>("internalemailaddress")),
++            Roles         = FetchRolesForUser(user.Id, cancellationToken),
++        };
++        return dto;
++    }
++
++    private static string? ExtractApplicationId(Entity user)
++    {
++        // applicationid surfaces as either a string or a Guid depending on SDK
++        // path; normalise to lowercase string with no braces so the JSON shape
++        // matches AC-3 verbatim.
++        if (!user.Attributes.TryGetValue("applicationid", out var raw) || raw is null)
++            return null;
++        return raw switch
++        {
++            Guid g     => g.ToString(),
++            string s   => string.IsNullOrWhiteSpace(s) ? null : s,
++            _          => raw.ToString(),
++        };
++    }
++
++    private static string? NullIfBlank(string? value) =>
++        string.IsNullOrWhiteSpace(value) ? null : value;
++
++    private IReadOnlyList<string> FetchRolesForUser(Guid userId, CancellationToken cancellationToken)
++    {
++        cancellationToken.ThrowIfCancellationRequested();
++
++        try
++        {
++            var query = new QueryExpression("role")
++            {
++                ColumnSet = new ColumnSet("name"),
++            };
++            var link = query.AddLink("systemuserroles", "roleid", "roleid");
++            link.LinkCriteria.AddCondition("systemuserid", ConditionOperator.Equal, userId);
++
++            var result = _service.RetrieveMultiple(query);
++            if (result?.Entities is null || result.Entities.Count == 0)
++                return Array.Empty<string>();
++
++            var names = new List<string>(result.Entities.Count);
++            foreach (var entity in result.Entities)
++            {
++                if (entity.GetAttributeValue<string?>("name") is { Length: > 0 } name)
++                    names.Add(name);
++            }
++            return names;
++        }
++        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
++        {
++            // NFR-007 — cancellation MUST propagate; do NOT swallow it inside
++            // the per-user catch. Without the `when` filter the broader catch
++            // below would silently mask a cancelling orchestrator.
++            throw;
++        }
++        catch (Exception ex) when (ex is FaultException<OrganizationServiceFault>
++                                       or TimeoutException
++                                       or CommunicationException
++                                       or HttpRequestException)
++        {
++            // NFR-007 — never echo ex.Message; the SDK fault can carry
++            // connection-string fragments. The sentinel array preserves the
++            // renderer's "no roles" vs "lookup failed" distinction (AC-4).
++            return new[] { RoleLookupUnavailableSentinel };
++        }
++    }
++
++    // ── DTO ───────────────────────────────────────────────────────────────────
++
++    private sealed class ApplicationUserDto
++    {
++        public string?               DisplayName   { get; set; }
++        public string?               ApplicationId { get; set; }
++        public string?               Email         { get; set; }
++        public IReadOnlyList<string> Roles         { get; set; } = Array.Empty<string>();
++    }
++}
+diff --git a/src/DataverseDocAgent.Api/Documents/DocxBuilder.cs b/src/DataverseDocAgent.Api/Documents/DocxBuilder.cs
+index e852045..dd1b478 100644
+--- a/src/DataverseDocAgent.Api/Documents/DocxBuilder.cs
++++ b/src/DataverseDocAgent.Api/Documents/DocxBuilder.cs
+@@ -1,5 +1,6 @@
+ // F-013 — FR-013 — DocxBuilder produces the Mode 1 .docx (Story 3.5, PRD §8.1)
+ // F-047 — FR-042 — Publisher Prefix Summary sub-section (Story 3.6)
++// F-055 — FR-050 — Section 5 "Application Users (Integration Signals)" (Story 3.7)
+ using System.Text;
+ using DocumentFormat.OpenXml;
+ using DocumentFormat.OpenXml.Packaging;
+@@ -41,6 +42,7 @@ public static class DocxBuilder
+             AppendCustomTablesSection(body, model.Tables);
+             AppendFieldCatalogueSection(body, model.Tables, model.Fields);
+             AppendRelationshipMapSection(body, model.Tables, model.Relationships);
++            AppendApplicationUsersSection(body, model.Tables, model.ApplicationUsers);
+ 
+             mainPart.Document.Save();
+         }
+@@ -250,6 +252,52 @@ public static class DocxBuilder
+         }
+     }
+ 
++    // ── Story 3.7 — Section 5: Application Users (Integration Signals) ───────
++
++    private const string ApplicationUsersProse =
++        "Application users are typically used by external integrations. The following "
++        + "application users are registered and may be writing to tables in this environment.";
++
++    private const string NoApplicationUsersSentence =
++        "No application users registered in this environment.";
++
++    private static void AppendApplicationUsersSection(
++        Body body,
++        IReadOnlyList<TableInfo> tables,
++        IReadOnlyList<ApplicationUserInfo> applicationUsers)
++    {
++        // AC-10 — section is suppressed only when the document is otherwise
++        // empty (no tables AND no application users). For any populated
++        // environment the section header + FR-050 prose paragraph is always
++        // present, even when the user list itself is empty.
++        if (tables.Count == 0 && applicationUsers.Count == 0) return;
++
++        AppendHeading(body, "5. Application Users (Integration Signals)", level: 1);
++        AppendParagraph(body, ApplicationUsersProse);
++
++        if (applicationUsers.Count == 0)
++        {
++            AppendParagraph(body, NoApplicationUsersSentence);
++            return;
++        }
++
++        // AC-9 — three-column table: Display Name | Application ID | Roles.
++        // Empty role list renders the literal "(no roles assigned)" so the
++        // cell is never blank; the sentinel "(role lookup unavailable)" from
++        // GetApplicationUsersTool is preserved verbatim because it survives
++        // the same join path.
++        var rows = applicationUsers.Select(u => new[]
++        {
++            u.DisplayName   ?? string.Empty,
++            u.ApplicationId ?? string.Empty,
++            u.Roles is { Count: > 0 } ? string.Join(", ", u.Roles) : "(no roles assigned)",
++        }).ToArray();
++
++        body.AppendChild(BuildTable(
++            new[] { "Display Name", "Application ID", "Roles" },
++            rows));
++    }
++
+     private static void AppendRelationshipMapSection(
+         Body body,
+         IReadOnlyList<TableInfo> tables,
+diff --git a/src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs b/src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs
+index 2bff777..81de374 100644
+--- a/src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs
++++ b/src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs
+@@ -1,4 +1,5 @@
+ // F-013 — FR-013 — Structured input to the .docx builder (Story 3.5)
++// F-055 — FR-050 — Top-level ApplicationUsers slot (Story 3.7)
+ namespace DataverseDocAgent.Api.Documents;
+ 
+ /// <summary>
+@@ -13,6 +14,12 @@ public sealed class GeneratedDocumentModel
+     public required IReadOnlyList<TableInfo>               Tables        { get; init; }
+     public required IReadOnlyDictionary<string, IReadOnlyList<FieldInfo>>        Fields        { get; init; }
+     public required IReadOnlyDictionary<string, IReadOnlyList<RelationshipInfo>> Relationships { get; init; }
++
++    // Story 3.7 — F-055 / FR-050. `required` so a future refactor cannot
++    // silently bypass the GetApplicationUsersTool result. Peer to Tables /
++    // Fields / Relationships (NOT nested under Summary) so the renderer can
++    // emit a top-level Section 5 without reaching into the executive summary.
++    public required IReadOnlyList<ApplicationUserInfo> ApplicationUsers { get; init; }
+ }
+ 
+ public sealed class ExecutiveSummary
+@@ -60,3 +67,16 @@ public sealed class RelationshipInfo
+     public          string? CascadeDelete    { get; init; }
+     public          string? BusinessMeaning  { get; init; }
+ }
++
++// Story 3.7 — F-055 / FR-050. Snapshot of one application (non-human integration)
++// user as surfaced by `get_application_users`. Roles is initialised so a missing
++// JSON key deserialises to an empty list rather than null; the renderer treats
++// empty roles as "(no roles assigned)" but treats the single-element sentinel
++// "(role lookup unavailable)" verbatim per AC-4.
++public sealed class ApplicationUserInfo
++{
++    public          string?               DisplayName   { get; init; }
++    public          string?               ApplicationId { get; init; }
++    public          string?               Email         { get; init; }
++    public          IReadOnlyList<string> Roles         { get; init; } = Array.Empty<string>();
++}
+diff --git a/src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs b/src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs
+index 6e811aa..bc2ade3 100644
+--- a/src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs
++++ b/src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs
+@@ -186,6 +186,16 @@ public sealed class DocumentGenerateService : IGenerationPipeline
+         // blob and the analyzer cost is observable on the per-job log line.
+         var prefixSummary = PrefixAnalyzer.Analyze(tables);
+ 
++        // Story 3.7 — F-055 / FR-050. Defence-in-depth: a Claude response that
++        // drops the `applicationUsers` key (e.g. Mode 1 prompt drift, or a stale
++        // model that still emits the four-key Story 3.5 shape) parses as an
++        // empty list rather than failing AI_ERROR. Null entries inside the
++        // array are also filtered out at the parse boundary — mirrors the
++        // Story 3.6 P2 null-entry filter for Tables.
++        var applicationUsers = (IReadOnlyList<ApplicationUserInfo>?)(
++            parsed.ApplicationUsers?.Where(u => u is not null).ToList())
++            ?? Array.Empty<ApplicationUserInfo>();
++
+         var model = new GeneratedDocumentModel
+         {
+             Summary = new ExecutiveSummary
+@@ -202,9 +212,10 @@ public sealed class DocumentGenerateService : IGenerationPipeline
+                 KeyObservations   = (IReadOnlyList<string>?)parsed.KeyObservations ?? Array.Empty<string>(),
+                 PrefixSummary     = prefixSummary,
+             },
+-            Tables        = tables,
+-            Fields        = CoerceDict(parsed.Fields),
+-            Relationships = CoerceDict(parsed.Relationships),
++            Tables           = tables,
++            Fields           = CoerceDict(parsed.Fields),
++            Relationships    = CoerceDict(parsed.Relationships),
++            ApplicationUsers = applicationUsers,
+         };
+ 
+         // ── Render + store ────────────────────────────────────────────────────
+@@ -223,11 +234,16 @@ public sealed class DocumentGenerateService : IGenerationPipeline
+ 
+     internal sealed class AgentJsonModel
+     {
+-        public OrganisationDto?                              Organisation    { get; set; }
+-        public List<TableInfo>?                              Tables          { get; set; }
+-        public Dictionary<string, List<FieldInfo>?>?         Fields          { get; set; }
+-        public Dictionary<string, List<RelationshipInfo>?>?  Relationships   { get; set; }
+-        public List<string>?                                 KeyObservations { get; set; }
++        public OrganisationDto?                              Organisation     { get; set; }
++        public List<TableInfo>?                              Tables           { get; set; }
++        public Dictionary<string, List<FieldInfo>?>?         Fields           { get; set; }
++        public Dictionary<string, List<RelationshipInfo>?>?  Relationships    { get; set; }
++        public List<string>?                                 KeyObservations  { get; set; }
++        // Story 3.7 — F-055 / FR-050. Optional in the DTO so a Claude response
++        // that omits the key (e.g. backwards-compatible four-key shape from
++        // Story 3.5) deserialises cleanly and the safe-coalesce in
++        // RunPipelineAsync renders the empty Section 5.
++        public List<ApplicationUserInfo>?                    ApplicationUsers { get; set; }
+     }
+ 
+     internal sealed class OrganisationDto
+diff --git a/tests/DataverseDocAgent.Tests/DataverseToolFactoryTests.cs b/tests/DataverseDocAgent.Tests/DataverseToolFactoryTests.cs
+index 616cae7..4dd0bc6 100644
+--- a/tests/DataverseDocAgent.Tests/DataverseToolFactoryTests.cs
++++ b/tests/DataverseDocAgent.Tests/DataverseToolFactoryTests.cs
+@@ -8,15 +8,18 @@ namespace DataverseDocAgent.Tests;
+ public class DataverseToolFactoryTests
+ {
+     [Fact]
+-    public void CreateMode1Tools_ReturnsExactlyFourNamedTools()
++    public void CreateMode1Tools_ReturnsExactlyFiveNamedTools()
+     {
+         var svc = new Mock<IOrganizationService>().Object;
+         var tools = DataverseToolFactory.CreateMode1Tools(svc);
+ 
+         var names = tools.Select(t => t.Name).ToArray();
+-        // Exact-set assertion: a regression that swaps or drops a tool changes Mode 1's
+-        // capability surface. Story 3.5 adds get_organisation_metadata as the 4th tool
+-        // that drives the executive-summary section of the generated .docx (FR-011).
++        // Exact-ordered assertion: a regression that swaps, drops, or reorders
++        // a tool changes Mode 1's capability surface. Story 3.5 added
++        // get_organisation_metadata as the 4th tool. Story 3.7 adds
++        // get_application_users as the 5th tool (FR-050) — the trailing slot
++        // is pinned here so a future addition cannot silently shift the
++        // application-users tool out of its documented position.
+         Assert.Equal(
+             new[]
+             {
+@@ -24,6 +27,7 @@ public class DataverseToolFactoryTests
+                 "get_table_fields",
+                 "get_relationships",
+                 "get_organisation_metadata",
++                "get_application_users",
+             },
+             names);
+     }
+diff --git a/tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs b/tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs
+index f5a772f..a31d8fc 100644
+--- a/tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs
++++ b/tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs
+@@ -98,6 +98,57 @@ public class DocumentGenerateServiceTests
+         Assert.Contains(summary.MicrosoftPrefixes, p => p.Prefix == "cr3a7");
+     }
+ 
++    // Story 3.7 AC-11 — DocumentGenerateService must defend against a Claude
++    // response that omits the `applicationUsers` key entirely (e.g. older
++    // four-key shape from Story 3.5, or a prompt-drift regression). The
++    // missing key parses as a null `ApplicationUsers` on AgentJsonModel and
++    // is safe-coalesced to an empty list before the renderer sees it — the
++    // pipeline must NOT raise AI_ERROR for this case.
++    [Fact]
++    public void ParseAgentJson_MissingApplicationUsersKey_DeserialisesToNull_ForSafeCoalesce()
++    {
++        const string raw = """
++            {
++              "organisation": { "environmentName": "Contoso" },
++              "tables": [
++                { "logicalName": "vel_account" }
++              ]
++            }
++            """;
++
++        var parsed = DocumentGenerateService.ParseAgentJson(raw);
++
++        // Null sentinel — service-level safe-coalesce (parsed.ApplicationUsers?…
++        // ?? Array.Empty<ApplicationUserInfo>()) turns this into the empty
++        // Section 5 render branch (AC-10).
++        Assert.Null(parsed.ApplicationUsers);
++    }
++
++    // Story 3.7 — null entry inside the applicationUsers array (analogous to
++    // the Story 3.6 P13 tables-null filter). The service strips nulls before
++    // the renderer touches the list.
++    [Fact]
++    public void ParseAgentJson_NullApplicationUserEntry_SurvivesAndIsFilteredAtServiceBoundary()
++    {
++        const string raw = """
++            {
++              "applicationUsers": [
++                null,
++                { "displayName": "Sync App", "applicationId": "11111111-1111-1111-1111-111111111111",
++                  "roles": ["Reader"] }
++              ]
++            }
++            """;
++
++        var parsed = DocumentGenerateService.ParseAgentJson(raw);
++        Assert.NotNull(parsed.ApplicationUsers);
++        var filtered = parsed.ApplicationUsers!.Where(u => u is not null).ToList();
++
++        Assert.Single(filtered);
++        Assert.Equal("Sync App", filtered[0].DisplayName);
++        Assert.Equal(new[] { "Reader" }, filtered[0].Roles);
++    }
++
+     // Story 3.6 code-review P13 — JSON `tables: [null, {...}]` is a real
+     // possibility from a flaky agent payload. ParseAgentJson deserialises
+     // the null as a real element; the service-level filter removes it before
+diff --git a/tests/DataverseDocAgent.Tests/DocxBuilderTests.cs b/tests/DataverseDocAgent.Tests/DocxBuilderTests.cs
+index 3c32586..a85998c 100644
+--- a/tests/DataverseDocAgent.Tests/DocxBuilderTests.cs
++++ b/tests/DataverseDocAgent.Tests/DocxBuilderTests.cs
+@@ -1,6 +1,7 @@
+ // F-013 — Story 3.5 DocxBuilder tests — section presence + structural validity
+ // F-047 — Story 3.6 adds three AC-5 narrative tests + empty-environment guard for
+ //         the Publisher Prefix Summary sub-section.
++// F-055 — Story 3.7 adds Section 5 (Application Users) populated + empty tests.
+ using DataverseDocAgent.Api.Documents;
+ using DataverseDocAgent.Api.Features.DocumentGenerate;
+ using DocumentFormat.OpenXml.Packaging;
+@@ -72,9 +73,10 @@ public class DocxBuilderTests
+                 KeyObservations   = Array.Empty<string>(),
+                 PrefixSummary     = EmptyPrefixSummary(),
+             },
+-            Tables        = Array.Empty<TableInfo>(),
+-            Fields        = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
+-            Relationships = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
++            Tables           = Array.Empty<TableInfo>(),
++            Fields           = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
++            Relationships    = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
++            ApplicationUsers = Array.Empty<ApplicationUserInfo>(),
+         };
+ 
+         var bytes = DocxBuilder.Build(model);
+@@ -88,6 +90,10 @@ public class DocxBuilderTests
+         // Story 3.6 AC-7 — for an empty environment the section header is omitted.
+         var text = string.Join("\n", body.Descendants<Text>().Select(t => t.Text ?? string.Empty));
+         Assert.DoesNotContain("Publisher Prefix Summary", text);
++        // Story 3.7 AC-10 — Section 5 is suppressed only when both tables AND
++        // application users are empty. For this empty-environment fixture the
++        // section header must NOT render.
++        Assert.DoesNotContain("5. Application Users (Integration Signals)", text);
+     }
+ 
+     [Fact]
+@@ -110,9 +116,10 @@ public class DocxBuilderTests
+                     .ToArray(),
+                 PrefixSummary     = EmptyPrefixSummary(),
+             },
+-            Tables        = Array.Empty<TableInfo>(),
+-            Fields        = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
+-            Relationships = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
++            Tables           = Array.Empty<TableInfo>(),
++            Fields           = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
++            Relationships    = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
++            ApplicationUsers = Array.Empty<ApplicationUserInfo>(),
+         };
+ 
+         var bytes = DocxBuilder.Build(model);
+@@ -287,6 +294,155 @@ public class DocxBuilderTests
+         Assert.DoesNotContain("(1 components)", text);
+     }
+ 
++    // ─── Story 3.7 — Section 5 Application Users ─────────────────────────────
++
++    [Fact]
++    public void Build_ApplicationUsersSection_Populated_RendersHeadingProseAndTable()
++    {
++        var users = new[]
++        {
++            new ApplicationUserInfo
++            {
++                DisplayName   = "Integration Sync",
++                ApplicationId = "11111111-1111-1111-1111-111111111111",
++                Email         = "sync@contoso.onmicrosoft.com",
++                Roles         = new[] { "Reader", "Custom Writer" },
++            },
++            new ApplicationUserInfo
++            {
++                DisplayName   = "Logic Apps Connector",
++                ApplicationId = "22222222-2222-2222-2222-222222222222",
++                Email         = null,
++                Roles         = new[]
++                {
++                    GetApplicationUsersTool_RoleLookupSentinel,
++                },
++            },
++        };
++        var model = BuildModelWithApplicationUsers(users, tableCount: 4);
++
++        var text = RenderText(model);
++
++        // AC-9 — heading + literal FR-050 prose paragraph.
++        Assert.Contains("5. Application Users (Integration Signals)", text);
++        Assert.Contains(
++            "Application users are typically used by external integrations. The following "
++            + "application users are registered and may be writing to tables in this environment.",
++            text);
++        // AC-9 — three-column header.
++        Assert.Contains("Display Name", text);
++        Assert.Contains("Application ID", text);
++        Assert.Contains("Roles", text);
++        // Per-user rows.
++        Assert.Contains("Integration Sync",                                text);
++        Assert.Contains("11111111-1111-1111-1111-111111111111",            text);
++        Assert.Contains("Reader, Custom Writer",                           text);
++        Assert.Contains("Logic Apps Connector",                            text);
++        Assert.Contains("22222222-2222-2222-2222-222222222222",            text);
++        // Sentinel preserved verbatim per AC-4 / AC-9.
++        Assert.Contains(GetApplicationUsersTool_RoleLookupSentinel,        text);
++        // Empty list fallback prose must NOT be emitted when users exist.
++        Assert.DoesNotContain("No application users registered in this environment.", text);
++    }
++
++    [Fact]
++    public void Build_ApplicationUsersSection_EmptyList_PopulatedEnvironment_RendersHeadingAndFallbackProse()
++    {
++        // AC-10 — Section 5 must still render its heading + literal prose +
++        // the "No application users registered" sentence whenever the document
++        // is otherwise non-empty (Tables.Count > 0). The breakdown table is
++        // omitted in this branch.
++        var model = BuildModelWithApplicationUsers(
++            users: Array.Empty<ApplicationUserInfo>(),
++            tableCount: 3);
++
++        var text = RenderText(model);
++
++        Assert.Contains("5. Application Users (Integration Signals)",       text);
++        Assert.Contains(
++            "Application users are typically used by external integrations. The following "
++            + "application users are registered and may be writing to tables in this environment.",
++            text);
++        Assert.Contains("No application users registered in this environment.", text);
++        // No table headers when the user list is empty.
++        Assert.DoesNotContain("Display Name", text);
++        Assert.DoesNotContain("Application ID", text);
++    }
++
++    [Fact]
++    public void Build_ApplicationUsersSection_EmptyRolesList_RendersNoRolesAssignedLiteral()
++    {
++        // AC-9 final clause — an empty roles array must render the literal
++        // "(no roles assigned)" so the cell is never blank. Distinct from the
++        // AC-4 sentinel which means the lookup itself failed.
++        var users = new[]
++        {
++            new ApplicationUserInfo
++            {
++                DisplayName   = "Bare User",
++                ApplicationId = "33333333-3333-3333-3333-333333333333",
++                Email         = null,
++                Roles         = Array.Empty<string>(),
++            },
++        };
++
++        var text = RenderText(BuildModelWithApplicationUsers(users, tableCount: 1));
++
++        Assert.Contains("Bare User",          text);
++        Assert.Contains("(no roles assigned)", text);
++        Assert.DoesNotContain(GetApplicationUsersTool_RoleLookupSentinel, text);
++    }
++
++    [Fact]
++    public void Build_ApplicationUsersSection_FullyEmptyEnvironment_OmitsSectionHeader()
++    {
++        // AC-10 — when Tables.Count == 0 AND ApplicationUsers.Count == 0 the
++        // section heading must NOT render. This is the only branch where the
++        // header is suppressed.
++        var model = BuildModelWithApplicationUsers(
++            users: Array.Empty<ApplicationUserInfo>(),
++            tableCount: 0);
++
++        var text = RenderText(model);
++
++        Assert.DoesNotContain("5. Application Users (Integration Signals)", text);
++        Assert.DoesNotContain(
++            "Application users are typically used by external integrations.",
++            text);
++    }
++
++    private const string GetApplicationUsersTool_RoleLookupSentinel = "(role lookup unavailable)";
++
++    private static GeneratedDocumentModel BuildModelWithApplicationUsers(
++        IReadOnlyList<ApplicationUserInfo> users,
++        int tableCount)
++    {
++        // Section-5 visibility (AC-10) is gated on the model's Tables
++        // collection size, not the summary's TableCount counter — populate
++        // the collection so the fixture exercises the "tables present" branch.
++        var tables = Enumerable.Range(0, tableCount)
++            .Select(i => new TableInfo { LogicalName = $"fake_table_{i}" })
++            .ToArray();
++        return new GeneratedDocumentModel
++        {
++            Summary = new ExecutiveSummary
++            {
++                EnvironmentName   = "App Users Test Org",
++                ScanDate          = new DateTime(2026, 5, 14, 12, 0, 0, DateTimeKind.Utc),
++                ComplexityRating  = "Medium",
++                TableCount        = tableCount,
++                FieldCount        = 0,
++                RelationshipCount = 0,
++                KeyObservations   = Array.Empty<string>(),
++                PrefixSummary     = EmptyPrefixSummary(),
++            },
++            Tables           = tables,
++            Fields           = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
++            Relationships    = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
++            ApplicationUsers = users,
++        };
++    }
++
+     // ─── Helpers ─────────────────────────────────────────────────────────────
+ 
+     private static string RenderText(GeneratedDocumentModel model)
+@@ -312,9 +468,10 @@ public class DocxBuilderTests
+                 KeyObservations   = Array.Empty<string>(),
+                 PrefixSummary     = prefix,
+             },
+-            Tables        = Array.Empty<TableInfo>(),
+-            Fields        = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
+-            Relationships = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
++            Tables           = Array.Empty<TableInfo>(),
++            Fields           = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
++            Relationships    = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
++            ApplicationUsers = Array.Empty<ApplicationUserInfo>(),
+         };
+ 
+     private static PublisherPrefixSummary EmptyPrefixSummary() => new()
+@@ -389,5 +546,6 @@ public class DocxBuilderTests
+                 },
+             },
+         },
++        ApplicationUsers = Array.Empty<ApplicationUserInfo>(),
+     };
+ }
+diff --git a/tests/DataverseDocAgent.Tests/GetApplicationUsersToolTests.cs b/tests/DataverseDocAgent.Tests/GetApplicationUsersToolTests.cs
+new file mode 100644
+index 0000000..8068a8b
+--- /dev/null
++++ b/tests/DataverseDocAgent.Tests/GetApplicationUsersToolTests.cs
+@@ -0,0 +1,272 @@
++// F-055 — FR-050 — GetApplicationUsersTool unit tests (Story 3.7)
++using System.ServiceModel;
++using System.Text.Json;
++using DataverseDocAgent.Api.Agent.Tools;
++using Microsoft.Xrm.Sdk;
++using Microsoft.Xrm.Sdk.Query;
++using Moq;
++
++namespace DataverseDocAgent.Tests;
++
++public class GetApplicationUsersToolTests
++{
++    // ── Contract tests ────────────────────────────────────────────────────────
++
++    [Fact]
++    public void Name_Is_get_application_users()
++    {
++        var tool = new GetApplicationUsersTool(new Mock<IOrganizationService>().Object);
++        Assert.Equal("get_application_users", tool.Name);
++    }
++
++    [Fact]
++    public void Description_IsNonEmpty()
++    {
++        var tool = new GetApplicationUsersTool(new Mock<IOrganizationService>().Object);
++        Assert.False(string.IsNullOrWhiteSpace(tool.Description));
++    }
++
++    [Fact]
++    public void InputSchema_IsObjectWithNoProperties()
++    {
++        var tool   = new GetApplicationUsersTool(new Mock<IOrganizationService>().Object);
++        var schema = tool.InputSchema;
++
++        Assert.Equal(JsonValueKind.Object, schema.ValueKind);
++        Assert.Equal("object", schema.GetProperty("type").GetString());
++        var props = schema.GetProperty("properties");
++        Assert.Empty(props.EnumerateObject());
++    }
++
++    [Fact]
++    public void Constructor_NullService_Throws()
++    {
++        Assert.Throws<ArgumentNullException>(() => new GetApplicationUsersTool(null!));
++    }
++
++    // ── AC-2 / AC-3 happy path ────────────────────────────────────────────────
++
++    [Fact]
++    public async Task ExecuteAsync_PopulatedEnvironment_ReturnsUsersWithRoles()
++    {
++        var userId1 = Guid.Parse("11111111-1111-1111-1111-111111111111");
++        var appId1  = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++        var userId2 = Guid.Parse("22222222-2222-2222-2222-222222222222");
++        var appId2  = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
++
++        var systemUsers = new EntityCollection
++        {
++            Entities =
++            {
++                BuildSystemUserEntity(userId1, "Integration Sync",
++                    appId1, "sync@contoso.onmicrosoft.com"),
++                BuildSystemUserEntity(userId2, "Logic Apps Connector",
++                    appId2, internalEmail: null),
++            },
++        };
++
++        var svc = new Mock<IOrganizationService>();
++        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsSystemUserQuery(q))))
++           .Returns(systemUsers);
++
++        // Per-user role-lookup mocks: dispatch by the systemuserid link
++        // criteria so each user gets a distinct result.
++        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsRoleQueryForUser(q, userId1))))
++           .Returns(BuildRoleCollection("Reader", "Custom Writer"));
++        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsRoleQueryForUser(q, userId2))))
++           .Returns(BuildRoleCollection("Workflow Runner"));
++
++        var tool = new GetApplicationUsersTool(svc.Object);
++        var json = await tool.ExecuteAsync(EmptyInput());
++
++        var root = JsonDocument.Parse(json).RootElement;
++        Assert.True(root.TryGetProperty("applicationUsers", out var users));
++        Assert.Equal(2, users.GetArrayLength());
++
++        var u0 = users[0];
++        Assert.Equal("Integration Sync",                   u0.GetProperty("displayName").GetString());
++        Assert.Equal(appId1.ToString(),                    u0.GetProperty("applicationId").GetString());
++        Assert.Equal("sync@contoso.onmicrosoft.com",       u0.GetProperty("email").GetString());
++        var roles0 = u0.GetProperty("roles").EnumerateArray().Select(e => e.GetString()).ToArray();
++        Assert.Equal(new[] { "Reader", "Custom Writer" },  roles0);
++
++        var u1 = users[1];
++        Assert.Equal("Logic Apps Connector",               u1.GetProperty("displayName").GetString());
++        Assert.Equal(appId2.ToString(),                    u1.GetProperty("applicationId").GetString());
++        // null email is dropped by WhenWritingNull policy — the JSON object
++        // simply has no `email` property in that case.
++        Assert.False(u1.TryGetProperty("email", out _));
++        var roles1 = u1.GetProperty("roles").EnumerateArray().Select(e => e.GetString()).ToArray();
++        Assert.Equal(new[] { "Workflow Runner" },          roles1);
++    }
++
++    // ── AC-4 — per-user role-lookup failure isolated ───────────────────────────
++
++    [Fact]
++    public async Task ExecuteAsync_PerUserRoleLookupFailure_SurfacesSentinelForBadUserOnly()
++    {
++        var goodId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++        var badId  = Guid.Parse("22222222-2222-2222-2222-222222222222");
++
++        var systemUsers = new EntityCollection
++        {
++            Entities =
++            {
++                BuildSystemUserEntity(goodId, "Healthy App",
++                    Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), "healthy@contoso.com"),
++                BuildSystemUserEntity(badId, "Faulty App",
++                    Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), null),
++            },
++        };
++
++        var svc = new Mock<IOrganizationService>();
++        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsSystemUserQuery(q))))
++           .Returns(systemUsers);
++        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsRoleQueryForUser(q, goodId))))
++           .Returns(BuildRoleCollection("Reader"));
++        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsRoleQueryForUser(q, badId))))
++           .Throws(new FaultException<OrganizationServiceFault>(
++               new OrganizationServiceFault { Message = "transient SDK fault" }));
++
++        var tool = new GetApplicationUsersTool(svc.Object);
++        var json = await tool.ExecuteAsync(EmptyInput());
++
++        var users = JsonDocument.Parse(json).RootElement.GetProperty("applicationUsers");
++        Assert.Equal(2, users.GetArrayLength());
++
++        // Healthy user kept its role; bad user surfaced sentinel.
++        var goodRoles = users[0].GetProperty("roles").EnumerateArray().Select(e => e.GetString()).ToArray();
++        Assert.Equal(new[] { "Reader" }, goodRoles);
++
++        var badRoles = users[1].GetProperty("roles").EnumerateArray().Select(e => e.GetString()).ToArray();
++        Assert.Single(badRoles);
++        Assert.Equal(GetApplicationUsersTool.RoleLookupUnavailableSentinel, badRoles[0]);
++    }
++
++    // ── AC-3 / AC-12 — empty environment returns empty array, not error ───────
++
++    [Fact]
++    public async Task ExecuteAsync_EmptyEnvironment_ReturnsEmptyApplicationUsersArray()
++    {
++        var svc = new Mock<IOrganizationService>();
++        svc.Setup(s => s.RetrieveMultiple(It.Is<QueryBase>(q => IsSystemUserQuery(q))))
++           .Returns(new EntityCollection());
++
++        var tool = new GetApplicationUsersTool(svc.Object);
++        var json = await tool.ExecuteAsync(EmptyInput());
++
++        var root = JsonDocument.Parse(json).RootElement;
++        Assert.True(root.TryGetProperty("applicationUsers", out var users));
++        Assert.Equal(JsonValueKind.Array, users.ValueKind);
++        Assert.Equal(0, users.GetArrayLength());
++        // No `error` key — empty list is a success, not a failure.
++        Assert.False(root.TryGetProperty("error", out _));
++    }
++
++    // ── AC-5 — outer SDK fault returns structured error ───────────────────────
++
++    [Fact]
++    public async Task ExecuteAsync_OuterFault_ReturnsStructuredError()
++    {
++        var svc = new Mock<IOrganizationService>();
++        svc.Setup(s => s.RetrieveMultiple(It.IsAny<QueryBase>()))
++           .Throws(new FaultException<OrganizationServiceFault>(
++               new OrganizationServiceFault { Message = "Authentication failed for tenant abc-123" }));
++
++        var tool = new GetApplicationUsersTool(svc.Object);
++        var json = await tool.ExecuteAsync(EmptyInput());
++
++        var root = JsonDocument.Parse(json).RootElement;
++        Assert.True(root.TryGetProperty("error", out var err));
++        Assert.Equal("Failed to list application users", err.GetString());
++        // No applicationUsers key on the error path.
++        Assert.False(root.TryGetProperty("applicationUsers", out _));
++    }
++
++    [Fact]
++    public async Task ExecuteAsync_OuterTimeout_ReturnsStructuredError()
++    {
++        var svc = new Mock<IOrganizationService>();
++        svc.Setup(s => s.RetrieveMultiple(It.IsAny<QueryBase>()))
++           .Throws(new TimeoutException("network slow"));
++
++        var tool = new GetApplicationUsersTool(svc.Object);
++        var json = await tool.ExecuteAsync(EmptyInput());
++
++        var root = JsonDocument.Parse(json).RootElement;
++        Assert.True(root.TryGetProperty("error", out var err));
++        Assert.Equal("Failed to list application users", err.GetString());
++    }
++
++    // ── AC-5 — OperationCanceledException MUST propagate (do not sanitize) ───
++
++    [Fact]
++    public async Task ExecuteAsync_AlreadyCancelledToken_Throws()
++    {
++        var tool = new GetApplicationUsersTool(new Mock<IOrganizationService>().Object);
++        using var cts = new CancellationTokenSource();
++        cts.Cancel();
++
++        await Assert.ThrowsAsync<OperationCanceledException>(
++            () => tool.ExecuteAsync(EmptyInput(), cts.Token));
++    }
++
++    // ── Helpers ───────────────────────────────────────────────────────────────
++
++    private static JsonElement EmptyInput() =>
++        JsonSerializer.Deserialize<JsonElement>("{}");
++
++    private static Entity BuildSystemUserEntity(
++        Guid systemUserId,
++        string fullName,
++        Guid applicationId,
++        string? internalEmail)
++    {
++        var e = new Entity("systemuser") { Id = systemUserId };
++        e["systemuserid"] = systemUserId;
++        e["fullname"]     = fullName;
++        e["applicationid"] = applicationId;
++        if (internalEmail is not null)
++            e["internalemailaddress"] = internalEmail;
++        return e;
++    }
++
++    private static EntityCollection BuildRoleCollection(params string[] roleNames)
++    {
++        var col = new EntityCollection();
++        foreach (var name in roleNames)
++        {
++            var r = new Entity("role") { Id = Guid.NewGuid() };
++            r["name"] = name;
++            col.Entities.Add(r);
++        }
++        return col;
++    }
++
++    private static bool IsSystemUserQuery(QueryBase q) =>
++        q is QueryExpression qx && string.Equals(qx.EntityName, "systemuser", StringComparison.OrdinalIgnoreCase);
++
++    private static bool IsRoleQueryForUser(QueryBase q, Guid userId)
++    {
++        if (q is not QueryExpression qx) return false;
++        if (!string.Equals(qx.EntityName, "role", StringComparison.OrdinalIgnoreCase)) return false;
++        // Walk linked entities for a systemuserroles link whose criteria
++        // matches the requested systemuserid.
++        foreach (var link in qx.LinkEntities)
++        {
++            if (!string.Equals(link.LinkToEntityName, "systemuserroles", StringComparison.OrdinalIgnoreCase))
++                continue;
++            foreach (var cond in link.LinkCriteria.Conditions)
++            {
++                if (string.Equals(cond.AttributeName, "systemuserid", StringComparison.OrdinalIgnoreCase)
++                    && cond.Values.Count == 1
++                    && cond.Values[0] is Guid g
++                    && g == userId)
++                {
++                    return true;
++                }
++            }
++        }
++        return false;
++    }
++}
+diff --git a/tests/DataverseDocAgent.Tests/PromptBuilderTests.cs b/tests/DataverseDocAgent.Tests/PromptBuilderTests.cs
+index 06f8a00..9b4b5d8 100644
+--- a/tests/DataverseDocAgent.Tests/PromptBuilderTests.cs
++++ b/tests/DataverseDocAgent.Tests/PromptBuilderTests.cs
+@@ -6,7 +6,7 @@ namespace DataverseDocAgent.Tests;
+ public class PromptBuilderTests
+ {
+     [Fact]
+-    public void BuildMode1Prompt_MentionsAllFourMode1Tools_AndForbidsCodeFences()
++    public void BuildMode1Prompt_MentionsAllFiveMode1Tools_AndForbidsCodeFences()
+     {
+         var prompt = PromptBuilder.BuildMode1Prompt();
+ 
+@@ -16,6 +16,8 @@ public class PromptBuilderTests
+         Assert.Contains("list_custom_tables",        prompt);
+         Assert.Contains("get_table_fields",          prompt);
+         Assert.Contains("get_relationships",         prompt);
++        // Story 3.7 — F-055 / FR-050. Fifth Mode 1 tool.
++        Assert.Contains("get_application_users",     prompt);
+ 
+         Assert.Contains("JSON", prompt);
+         Assert.Contains("no markdown code fences", prompt);
+@@ -30,4 +32,17 @@ public class PromptBuilderTests
+         var prompt = PromptBuilder.BuildMode1Prompt();
+         Assert.Contains("Do NOT invent a `complexityRating`", prompt);
+     }
++
++    [Fact]
++    public void BuildMode1Prompt_DeclaresApplicationUsersOutputKey_AndPassthroughRule()
++    {
++        // Story 3.7 AC-7 — Claude's JSON shape must gain a top-level
++        // `applicationUsers` key alongside the existing organisation / tables /
++        // fields / relationships / keyObservations keys, and the prompt must
++        // explicitly forbid redacting or summarising role names so the renderer
++        // can surface the verbatim role list (FR-050).
++        var prompt = PromptBuilder.BuildMode1Prompt();
++        Assert.Contains("applicationUsers", prompt);
++        Assert.Contains("Pass the role array through verbatim", prompt);
++    }
+ }

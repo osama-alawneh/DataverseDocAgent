@@ -1,0 +1,825 @@
+diff --git a/_bmad-output/implementation-artifacts/sprint-status.yaml b/_bmad-output/implementation-artifacts/sprint-status.yaml
+index ff1c333..182e414 100644
+--- a/_bmad-output/implementation-artifacts/sprint-status.yaml
++++ b/_bmad-output/implementation-artifacts/sprint-status.yaml
+@@ -35,7 +35,7 @@
+ # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+ 
+ generated: 2026-04-13
+-last_updated: 2026-05-14 (stories 3-6 publisher-prefix-intelligence + 3-7 application-user-inventory → ready-for-dev)
++last_updated: 2026-05-14 (story 3-6 publisher-prefix-intelligence → review)
+ project: DataverseDocAgent
+ project_key: NOKEY
+ tracking_system: file-system
+@@ -66,7 +66,7 @@ development_status:
+   3-3-get-api-download-token-endpoint: done
+   3-4-dataverse-tools-tables-fields-relationships: done
+   3-5-mode-1-post-api-document-generate-endpoint-and-full-request-to-download-flow: done
+-  3-6-publisher-prefix-intelligence: ready-for-dev
++  3-6-publisher-prefix-intelligence: review
+   3-7-application-user-inventory: ready-for-dev
+   3-8-dataverse-connection-factory-consolidation: done
+   epic-3-retrospective: optional
+diff --git a/_bmad-output/implementation-artifacts/story-3.6-publisher-prefix-intelligence.md b/_bmad-output/implementation-artifacts/story-3.6-publisher-prefix-intelligence.md
+index c152121..912757a 100644
+--- a/_bmad-output/implementation-artifacts/story-3.6-publisher-prefix-intelligence.md
++++ b/_bmad-output/implementation-artifacts/story-3.6-publisher-prefix-intelligence.md
+@@ -1,6 +1,6 @@
+ # Story 3.6: Publisher Prefix Intelligence
+ 
+-Status: ready-for-dev
++Status: review
+ 
+ <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
+ 
+@@ -26,34 +26,34 @@ so that I can immediately distinguish client-built tables from Microsoft tables
+ 
+ ## Tasks / Subtasks
+ 
+-- [ ] Add `PublisherPrefixSummary` to the document model (AC: 4)
+-  - [ ] Create `src/DataverseDocAgent.Api/Documents/PublisherPrefixSummary.cs`
++- [x] Add `PublisherPrefixSummary` to the document model (AC: 4)
++  - [x] Create `src/DataverseDocAgent.Api/Documents/PublisherPrefixSummary.cs`
+     - Properties: `string? PrimaryClientPrefix`, `IReadOnlyList<PrefixCount> MicrosoftPrefixes`, `IReadOnlyList<PrefixCount> ClientPrefixes`, `IReadOnlyList<PrefixCount> UnprefixedTables` (typically count 0 or 1 bucket), `bool NoClientPrefixDetected`.
+     - Sub-record: `public sealed record PrefixCount(string Prefix, int ComponentCount)`.
+-  - [ ] Extend `ExecutiveSummary` (`GeneratedDocumentModel.cs`) with a required `PublisherPrefixSummary PrefixSummary { get; init; }` slot. Required so the analyzer cannot be silently skipped.
+-- [ ] Implement `PrefixAnalyzer` (AC: 1, 2, 3)
+-  - [ ] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/PrefixAnalyzer.cs`
+-  - [ ] Static method: `PublisherPrefixSummary Analyze(IReadOnlyList<TableInfo> tables)`
+-  - [ ] Microsoft-pattern matcher: exact membership of `{ "msdyn_", "msft_", "adx_" }` OR regex `^cr([a-z0-9]+_)?$` against the **prefix segment + underscore** (i.e. compare `"cr_"` and `"crXXXX_"` shapes). Document the regex inline.
+-  - [ ] Tie-break primary client prefix alphabetically on the **lowercase prefix string**, not on the raw component (Dataverse already lowercases, but the comment should pin this).
+-  - [ ] Annotate file header: `// F-047 — FR-042 — Publisher Prefix Intelligence (Story 3.6)`
+-- [ ] Wire analyzer into `DocumentGenerateService` (AC: 4)
+-  - [ ] In `RunPipelineAsync`, immediately after `ComplexityRater.Rate` and before `DocxBuilder.Build`, call `PrefixAnalyzer.Analyze(parsed.Tables ?? Array.Empty<TableInfo>())` and inject the result into the `ExecutiveSummary` builder. The analyzer must run **before** the cancellation gate added in Story 3.5 code-review P9 (so a per-task timeout that fires between Claude returning and StoreAsync starting still produces no orphan blob).
+-- [ ] Render the section in `DocxBuilder` (AC: 5, 6, 7)
+-  - [ ] Inside `AppendExecutiveSummary` (after the counts table, before key observations), call a new private helper `AppendPublisherPrefixSection(body, summary.PrefixSummary, summary.TableCount)`.
+-  - [ ] The helper:
++  - [x] Extend `ExecutiveSummary` (`GeneratedDocumentModel.cs`) with a required `PublisherPrefixSummary PrefixSummary { get; init; }` slot. Required so the analyzer cannot be silently skipped.
++- [x] Implement `PrefixAnalyzer` (AC: 1, 2, 3)
++  - [x] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/PrefixAnalyzer.cs`
++  - [x] Static method: `PublisherPrefixSummary Analyze(IReadOnlyList<TableInfo> tables)`
++  - [x] Microsoft-pattern matcher: exact membership of `{ "msdyn", "msft", "adx" }` (prefix segment, no trailing `_`) OR regex `^cr[a-z0-9]*$` against the prefix segment. Covers bare legacy `cr_` and the Power Apps default-environment `crXXXX_` family. Documented inline.
++  - [x] Tie-break primary client prefix alphabetically on the **lowercase prefix string**, not on the raw component (Dataverse already lowercases, but the analyzer defensively re-lowers the logical name).
++  - [x] Annotate file header: `// F-047 — FR-042 — Publisher Prefix Intelligence (Story 3.6)`
++- [x] Wire analyzer into `DocumentGenerateService` (AC: 4)
++  - [x] In `RunPipelineAsync`, immediately after `ComplexityRater.Rate` and before `DocxBuilder.Build`, call `PrefixAnalyzer.Analyze(parsed.Tables ?? Array.Empty<TableInfo>())` and inject the result into the `ExecutiveSummary` builder. The analyzer runs **before** the cancellation gate added in Story 3.5 code-review P9 (so a per-task timeout that fires between Claude returning and StoreAsync starting still produces no orphan blob).
++- [x] Render the section in `DocxBuilder` (AC: 5, 6, 7)
++  - [x] Inside `AppendExecutiveSummary` (after the counts table, before key observations), call a new private helper `AppendPublisherPrefixSection(body, summary.PrefixSummary, summary.TableCount)`.
++  - [x] The helper:
+     - Returns immediately if `summary.TableCount == 0` (AC-7: no header rendered for an empty environment).
+     - Emits an `H2` heading `"Publisher Prefix Summary"`.
+     - Emits the one-sentence narrative paragraph computed deterministically from the summary shape (the three branches in AC-5).
+     - Emits a two-column table `Prefix | Component count` using the existing `BuildTable` helper, sorted: Microsoft bucket first (descending count), then Client/ISV (descending count), then `Unprefixed` if non-empty.
+-- [ ] Tests (AC: 8)
+-  - [ ] Create `tests/DataverseDocAgent.Tests/PrefixAnalyzerTests.cs` — pure-logic cases.
+-  - [ ] Extend `tests/DataverseDocAgent.Tests/DocxBuilderTests.cs` with one test per AC-5 branch, asserting the rendered prose AND the breakdown table presence/order.
+-  - [ ] Extend `tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs` so the parsed-and-enriched model carries the `PrefixSummary` (a single small integration test is enough — the controller and orchestrator paths are unchanged).
+-- [ ] No changes to (do **not** touch in this story)
+-  - [ ] `PromptBuilder.cs` — Claude is intentionally NOT asked to produce prefix data. FR-011 deterministic discipline.
+-  - [ ] `DataverseToolFactory.cs` — the four Mode 1 tools from Story 3.5 already supply the data via `list_custom_tables`. No new tool.
+-  - [ ] `IGenerationPipeline` / `GenerationBackgroundService` — pipeline contract is unchanged.
++- [x] Tests (AC: 8)
++  - [x] Create `tests/DataverseDocAgent.Tests/PrefixAnalyzerTests.cs` — pure-logic cases (multi-underscore split, MS pattern incl. 3× crXXXX, tie-break, empty Client/ISV bucket, Unprefixed bucket, descending-count ordering).
++  - [x] Extend `tests/DataverseDocAgent.Tests/DocxBuilderTests.cs` with one test per AC-5 branch, plus the AC-7 empty-environment header-omission guard.
++  - [x] Extend `tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs` with a parse → analyze handshake test.
++- [x] No changes to (do **not** touch in this story)
++  - [x] `PromptBuilder.cs` — Claude is intentionally NOT asked to produce prefix data. FR-011 deterministic discipline.
++  - [x] `DataverseToolFactory.cs` — the four Mode 1 tools from Story 3.5 already supply the data via `list_custom_tables`. No new tool.
++  - [x] `IGenerationPipeline` / `GenerationBackgroundService` — pipeline contract is unchanged.
+ 
+ ## Dev Notes
+ 
+@@ -102,6 +102,32 @@ claude-sonnet-4-6
+ 
+ ### Debug Log References
+ 
++- 2026-05-14 dev — initial test run failed `Build_PublisherPrefixSection_SingleClientPrefix_RendersAllClientCustomisationsSentence` because the breakdown-table order assertion measured `IndexOf` from string start and hit the narrative's mention of `'vel_'`/`msdyn_`/`msft_` first. Fix: anchor the search past the trailing narrative sentence `"No third-party ISV components detected."` so the assertion targets only the breakdown rows. All 222 tests pass after the fix.
++
+ ### Completion Notes List
+ 
++- Implemented deterministic `PrefixAnalyzer` (in-process, mirrors `ComplexityRater` shape) — no new Mode 1 agent tool added; FR-011 / FR-042 deterministic discipline preserved.
++- Microsoft matcher: exact set `{ msdyn, msft, adx }` plus regex `^cr[a-z0-9]*$` covering bare legacy `cr_` and the Power Apps default-environment `crXXXX_` family. Regex documented inline.
++- `ExecutiveSummary.PrefixSummary` is `required` — required-init contract prevents a future refactor from silently bypassing the analyzer.
++- `DocxBuilder.AppendPublisherPrefixSection` renders between the counts table and the key-observation bullets. Section omitted entirely when `TableCount == 0` (AC-7) — header is also omitted, matching the empty-environment Story 3.5 baseline.
++- Narrative variants: AC-5's three deterministic sentences are produced from the analyzer summary shape (no Claude involvement).
++- Tests: 222 pass (was 215 pre-story). New: 7 `PrefixAnalyzerTests` cases + 3 `DocxBuilderTests` AC-5 branches + AC-7 empty-environment header-omission assertion + 1 integration handshake in `DocumentGenerateServiceTests`.
++
+ ### File List
++
++- `src/DataverseDocAgent.Api/Documents/PublisherPrefixSummary.cs` (new)
++- `src/DataverseDocAgent.Api/Features/DocumentGenerate/PrefixAnalyzer.cs` (new)
++- `src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs` (modified — required `PrefixSummary` on `ExecutiveSummary`)
++- `src/DataverseDocAgent.Api/Documents/DocxBuilder.cs` (modified — new private `AppendPublisherPrefixSection` + narrative helper + call-site)
++- `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs` (modified — analyzer call in `RunPipelineAsync`, model build picks up `PrefixSummary`)
++- `tests/DataverseDocAgent.Tests/PrefixAnalyzerTests.cs` (new)
++- `tests/DataverseDocAgent.Tests/DocxBuilderTests.cs` (modified — AC-5 branch tests, AC-7 header-omission, `BuildSampleModel` updated for required init)
++- `tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs` (modified — parse → analyze integration test)
++- `_bmad-output/implementation-artifacts/sprint-status.yaml` (modified — story 3-6 → review)
++- `_bmad-output/implementation-artifacts/story-3.6-publisher-prefix-intelligence.md` (modified — task checkboxes, Dev Agent Record, status)
++
++### Change Log
++
++| Date       | Change                                                                       |
++|------------|------------------------------------------------------------------------------|
++| 2026-05-14 | Story 3.6 implemented — PrefixAnalyzer + Publisher Prefix Summary sub-section; 222 tests pass. |
+diff --git a/src/DataverseDocAgent.Api/Documents/DocxBuilder.cs b/src/DataverseDocAgent.Api/Documents/DocxBuilder.cs
+index 25c0519..1938cd4 100644
+--- a/src/DataverseDocAgent.Api/Documents/DocxBuilder.cs
++++ b/src/DataverseDocAgent.Api/Documents/DocxBuilder.cs
+@@ -1,4 +1,6 @@
+ // F-013 — FR-013 — DocxBuilder produces the Mode 1 .docx (Story 3.5, PRD §8.1)
++// F-047 — FR-042 — Publisher Prefix Summary sub-section (Story 3.6)
++using System.Text;
+ using DocumentFormat.OpenXml;
+ using DocumentFormat.OpenXml.Packaging;
+ using DocumentFormat.OpenXml.Wordprocessing;
+@@ -70,6 +72,11 @@ public static class DocxBuilder
+             });
+         body.AppendChild(counts);
+ 
++        // Story 3.6 — F-047 / FR-042. Renders between the counts table and
++        // the key-observation bullets per AC-5. Omitted entirely for an
++        // empty environment (AC-7).
++        AppendPublisherPrefixSection(body, summary.PrefixSummary, summary.TableCount);
++
+         AppendHeading(body, "Key observations", level: 2);
+         // Story 3.5 code-review P3 — defensively filter null entries; JSON
+         // `null` inside an array of strings deserialises to a real null and
+@@ -90,6 +97,79 @@ public static class DocxBuilder
+         }
+     }
+ 
++    // ── Story 3.6 — Publisher Prefix Summary sub-section ─────────────────────
++
++    private static void AppendPublisherPrefixSection(
++        Body body,
++        PublisherPrefixSummary prefixSummary,
++        int tableCount)
++    {
++        // AC-7 — for an empty environment we render nothing (not even the
++        // heading), so the Section 1 layout matches the Story 3.5 baseline.
++        if (tableCount == 0) return;
++
++        AppendHeading(body, "Publisher Prefix Summary", level: 2);
++        AppendParagraph(body, BuildPrefixNarrative(prefixSummary));
++
++        // AC-6 — breakdown table: Microsoft (desc count) → Client/ISV (desc
++        // count) → Unprefixed. Trailing underscore on bucketed prefixes,
++        // literal "(no prefix)" for the Unprefixed row.
++        var rows = new List<string[]>(
++            prefixSummary.MicrosoftPrefixes.Count +
++            prefixSummary.ClientPrefixes.Count +
++            prefixSummary.UnprefixedTables.Count);
++
++        foreach (var row in prefixSummary.MicrosoftPrefixes)
++        {
++            rows.Add(new[] { row.Prefix + "_", row.ComponentCount.ToString() });
++        }
++        foreach (var row in prefixSummary.ClientPrefixes)
++        {
++            rows.Add(new[] { row.Prefix + "_", row.ComponentCount.ToString() });
++        }
++        foreach (var row in prefixSummary.UnprefixedTables)
++        {
++            // Stored as the literal label by PrefixAnalyzer; do not append "_".
++            rows.Add(new[] { row.Prefix, row.ComponentCount.ToString() });
++        }
++
++        if (rows.Count > 0)
++        {
++            body.AppendChild(BuildTable(
++                new[] { "Prefix", "Component count" },
++                rows.ToArray()));
++        }
++    }
++
++    private static string BuildPrefixNarrative(PublisherPrefixSummary p)
++    {
++        // AC-5 branches are deterministic on the analyzer output shape so the
++        // sub-section prose is reproducible across runs (FR-042).
++        if (p.ClientPrefixes.Count == 0)
++        {
++            return "No client-defined publisher prefix detected — all custom components use default or Microsoft prefixes.";
++        }
++
++        if (p.ClientPrefixes.Count == 1)
++        {
++            var primary = p.ClientPrefixes[0].Prefix;
++            var sb = new StringBuilder();
++            sb.Append("All client customisations use the prefix '").Append(primary).Append("_'.");
++            if (p.MicrosoftPrefixes.Count > 0)
++            {
++                var msList = string.Join(", ", p.MicrosoftPrefixes.Select(m => m.Prefix + "_"));
++                sb.Append(" Microsoft components use ").Append(msList).Append('.');
++            }
++            sb.Append(" No third-party ISV components detected.");
++            return sb.ToString();
++        }
++
++        var top = p.ClientPrefixes[0];
++        return
++            "Multiple custom prefixes detected — environment may have multiple development teams or migration history. " +
++            $"Primary client prefix: '{top.Prefix}_' ({top.ComponentCount} components). See full breakdown below.";
++    }
++
+     private static void AppendCustomTablesSection(Body body, IReadOnlyList<TableInfo> tables)
+     {
+         AppendHeading(body, "2. Custom Tables", level: 1);
+diff --git a/src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs b/src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs
+index 2433944..2bff777 100644
+--- a/src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs
++++ b/src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs
+@@ -27,6 +27,10 @@ public sealed class ExecutiveSummary
+     public required int                    FieldCount         { get; init; }
+     public required int                    RelationshipCount  { get; init; }
+     public required IReadOnlyList<string>  KeyObservations    { get; init; }
++
++    // Story 3.6 — F-047 / FR-042. `required` so a future refactor cannot
++    // silently bypass the deterministic PrefixAnalyzer step.
++    public required PublisherPrefixSummary PrefixSummary      { get; init; }
+ }
+ 
+ public sealed class TableInfo
+diff --git a/src/DataverseDocAgent.Api/Documents/PublisherPrefixSummary.cs b/src/DataverseDocAgent.Api/Documents/PublisherPrefixSummary.cs
+new file mode 100644
+index 0000000..9d2ad85
+--- /dev/null
++++ b/src/DataverseDocAgent.Api/Documents/PublisherPrefixSummary.cs
+@@ -0,0 +1,32 @@
++// F-047 — FR-042 — Publisher Prefix Intelligence (Story 3.6)
++namespace DataverseDocAgent.Api.Documents;
++
++/// <summary>
++/// Deterministic publisher-prefix breakdown computed in C# host code
++/// (FR-011 / FR-042 — Claude is intentionally NOT trusted with this data).
++/// Consumed by <see cref="DocxBuilder"/> to render the
++/// "Publisher Prefix Summary" sub-section under the Executive Summary.
++///
++/// Buckets:
++///   <list type="bullet">
++///     <item><term>Microsoft</term><description>known Microsoft-owned prefixes (msdyn, msft, adx) and the Power Apps default-environment <c>cr[a-z0-9]*</c> family.</description></item>
++///     <item><term>Client/ISV</term><description>everything else with a recognisable prefix segment.</description></item>
++///     <item><term>Unprefixed</term><description>logical names without an underscore — never expected from <c>list_custom_tables</c>, surfaced as a single <c>(no prefix)</c> row when present.</description></item>
++///   </list>
++/// </summary>
++public sealed class PublisherPrefixSummary
++{
++    public          string?                       PrimaryClientPrefix    { get; init; }
++    public required IReadOnlyList<PrefixCount>    MicrosoftPrefixes      { get; init; }
++    public required IReadOnlyList<PrefixCount>    ClientPrefixes         { get; init; }
++    public required IReadOnlyList<PrefixCount>    UnprefixedTables       { get; init; }
++    public required bool                          NoClientPrefixDetected { get; init; }
++}
++
++/// <summary>
++/// One prefix observed across the scanned environment plus the number of
++/// custom-table components carrying it. Prefix is stored without trailing
++/// underscore; <see cref="DocxBuilder"/> appends the underscore at render
++/// time so the analyzer surface stays orthogonal to the document format.
++/// </summary>
++public sealed record PrefixCount(string Prefix, int ComponentCount);
+diff --git a/src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs b/src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs
+index 8d830c1..883ee0f 100644
+--- a/src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs
++++ b/src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs
+@@ -173,6 +173,12 @@ public sealed class DocumentGenerateService : IGenerationPipeline
+         var fieldCount        = parsed.Fields?.Values.Sum(f => f?.Count ?? 0) ?? 0;
+         var relationshipCount = parsed.Relationships?.Values.Sum(r => r?.Count ?? 0) ?? 0;
+         var rating            = ComplexityRater.Rate(tableCount, fieldCount, relationshipCount);
++        var tables            = (IReadOnlyList<TableInfo>?)parsed.Tables ?? Array.Empty<TableInfo>();
++
++        // Story 3.6 — F-047 / FR-042. Deterministic publisher-prefix breakdown,
++        // computed BEFORE the cancellation gate so a cancelled job emits no
++        // blob and the analyzer cost is observable on the per-job log line.
++        var prefixSummary = PrefixAnalyzer.Analyze(tables);
+ 
+         var model = new GeneratedDocumentModel
+         {
+@@ -188,8 +194,9 @@ public sealed class DocumentGenerateService : IGenerationPipeline
+                 FieldCount        = fieldCount,
+                 RelationshipCount = relationshipCount,
+                 KeyObservations   = (IReadOnlyList<string>?)parsed.KeyObservations ?? Array.Empty<string>(),
++                PrefixSummary     = prefixSummary,
+             },
+-            Tables        = (IReadOnlyList<TableInfo>?)parsed.Tables ?? Array.Empty<TableInfo>(),
++            Tables        = tables,
+             Fields        = CoerceDict(parsed.Fields),
+             Relationships = CoerceDict(parsed.Relationships),
+         };
+diff --git a/src/DataverseDocAgent.Api/Features/DocumentGenerate/PrefixAnalyzer.cs b/src/DataverseDocAgent.Api/Features/DocumentGenerate/PrefixAnalyzer.cs
+new file mode 100644
+index 0000000..cf2b726
+--- /dev/null
++++ b/src/DataverseDocAgent.Api/Features/DocumentGenerate/PrefixAnalyzer.cs
+@@ -0,0 +1,116 @@
++// F-047 — FR-042 — Publisher Prefix Intelligence (Story 3.6)
++using System.Text.RegularExpressions;
++using DataverseDocAgent.Api.Documents;
++
++namespace DataverseDocAgent.Api.Features.DocumentGenerate;
++
++/// <summary>
++/// Deterministic publisher-prefix bucketing for the Mode 1 Executive Summary.
++/// Mirrors the <see cref="ComplexityRater"/> pattern — runs in-process after
++/// Claude returns its structured JSON so the rendered breakdown is reproducible
++/// and Claude is never asked to classify prefixes (FR-011, FR-042).
++///
++/// Algorithm (AC-1 through AC-3):
++///   1. Prefix = segment of <c>logicalName</c> before the first underscore.
++///      Names with no underscore are routed into the <c>Unprefixed</c> bucket.
++///   2. Prefix is classified <c>Microsoft</c> if it exact-matches one of the
++///      known Microsoft owners (<c>msdyn</c>, <c>msft</c>, <c>adx</c>) OR
++///      matches the regex <c>^cr[a-z0-9]*$</c> — which covers both bare
++///      <c>cr_</c> and the Power Apps default-environment auto-generated
++///      <c>crXXXX_</c> family. Everything else goes into <c>Client/ISV</c>.
++///   3. Primary client prefix = Client/ISV bucket prefix with the highest
++///      component count, ties broken alphabetically (ordinal) on the
++///      lowercase prefix string. Empty Client/ISV bucket sets
++///      <see cref="PublisherPrefixSummary.NoClientPrefixDetected"/> = true and
++///      leaves <see cref="PublisherPrefixSummary.PrimaryClientPrefix"/> null.
++/// </summary>
++public static class PrefixAnalyzer
++{
++    // Microsoft-owned prefixes that are exact-matched against the lowercase
++    // prefix segment. Trailing underscore is omitted here because the
++    // segmentation step strips it; DocxBuilder re-attaches it at render time.
++    private static readonly HashSet<string> s_microsoftExactPrefixes =
++        new(StringComparer.Ordinal) { "msdyn", "msft", "adx" };
++
++    // ^cr[a-z0-9]*$ — matches the bare legacy "cr" prefix AND the Power Apps
++    // default-environment auto-generated "crXXXX_" family (e.g. cr3a7_, crf2b_).
++    // The match is applied against the prefix SEGMENT (without trailing _),
++    // so "cr"/"cr3a7"/"crf2b" all match. Documented inline because the success
++    // on auto-generated cr-prefixes is non-obvious to a future reader.
++    private static readonly Regex s_microsoftCrPrefix =
++        new(@"^cr[a-z0-9]*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
++
++    public static PublisherPrefixSummary Analyze(IReadOnlyList<TableInfo> tables)
++    {
++        ArgumentNullException.ThrowIfNull(tables);
++
++        var microsoftCounts = new Dictionary<string, int>(StringComparer.Ordinal);
++        var clientCounts    = new Dictionary<string, int>(StringComparer.Ordinal);
++        var unprefixedCount = 0;
++
++        foreach (var table in tables)
++        {
++            var logical = table.LogicalName;
++            if (string.IsNullOrWhiteSpace(logical))
++            {
++                // Defensive: a logical-name-less entry is not a real custom table —
++                // skip rather than emit an empty-string prefix.
++                continue;
++            }
++
++            // Dataverse normalises logical names to lowercase; defensively
++            // re-lower so a quirky test payload cannot break determinism.
++            var ln = logical.ToLowerInvariant();
++            var underscoreIndex = ln.IndexOf('_');
++            if (underscoreIndex <= 0)
++            {
++                // No underscore (or leading underscore) → no recognisable prefix.
++                // Bucket as Unprefixed per AC-2 / Dev Notes.
++                unprefixedCount++;
++                continue;
++            }
++
++            var prefix = ln.Substring(0, underscoreIndex);
++
++            if (IsMicrosoftPrefix(prefix))
++            {
++                microsoftCounts[prefix] = microsoftCounts.GetValueOrDefault(prefix) + 1;
++            }
++            else
++            {
++                clientCounts[prefix] = clientCounts.GetValueOrDefault(prefix) + 1;
++            }
++        }
++
++        var microsoftList = OrderByCountThenAlpha(microsoftCounts);
++        var clientList    = OrderByCountThenAlpha(clientCounts);
++
++        var unprefixedList = unprefixedCount > 0
++            ? (IReadOnlyList<PrefixCount>)new[] { new PrefixCount("(no prefix)", unprefixedCount) }
++            : Array.Empty<PrefixCount>();
++
++        var primary = clientList.Count > 0 ? clientList[0].Prefix : null;
++
++        return new PublisherPrefixSummary
++        {
++            PrimaryClientPrefix    = primary,
++            MicrosoftPrefixes      = microsoftList,
++            ClientPrefixes         = clientList,
++            UnprefixedTables       = unprefixedList,
++            NoClientPrefixDetected = primary is null,
++        };
++    }
++
++    private static bool IsMicrosoftPrefix(string prefix)
++        => s_microsoftExactPrefixes.Contains(prefix) || s_microsoftCrPrefix.IsMatch(prefix);
++
++    private static IReadOnlyList<PrefixCount> OrderByCountThenAlpha(Dictionary<string, int> counts)
++    {
++        if (counts.Count == 0) return Array.Empty<PrefixCount>();
++        return counts
++            .Select(kv => new PrefixCount(kv.Key, kv.Value))
++            .OrderByDescending(p => p.ComponentCount)
++            .ThenBy(p => p.Prefix, StringComparer.Ordinal)
++            .ToList();
++    }
++}
+diff --git a/tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs b/tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs
+index 5c6f85b..7be6be6 100644
+--- a/tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs
++++ b/tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs
+@@ -1,5 +1,7 @@
+ // F-001, F-013, NFR-014 — Story 3.5 DocumentGenerateService pipeline tests
++// F-047 — Story 3.6 PrefixSummary enrichment integration test
+ using System.Text.Json;
++using DataverseDocAgent.Api.Documents;
+ using DataverseDocAgent.Api.Features.DocumentGenerate;
+ using DataverseDocAgent.Api.Jobs;
+ 
+@@ -59,4 +61,36 @@ public class DocumentGenerateServiceTests
+         var result = DocumentGenerateService.StripCodeFences("```json\n{\"x\":1}\n```");
+         Assert.Equal("{\"x\":1}", result);
+     }
++
++    // Story 3.6 — F-047. The Mode 1 enrichment step feeds PrefixAnalyzer the
++    // tables Claude returns. The orchestrator and controller layers are
++    // unchanged, so a parse → analyze handshake test is enough to lock in
++    // that the enriched model carries a PrefixSummary derived from the JSON.
++    [Fact]
++    public void ParseAgentJson_TablesFeedPrefixAnalyzer_ProducesEnrichedSummary()
++    {
++        const string raw = """
++            {
++              "organisation": { "environmentName": "Contoso" },
++              "tables": [
++                { "logicalName": "vel_account" },
++                { "logicalName": "vel_contact" },
++                { "logicalName": "msdyn_thing" },
++                { "logicalName": "cr3a7_widget" }
++              ]
++            }
++            """;
++
++        var parsed   = DocumentGenerateService.ParseAgentJson(raw);
++        var tables   = (IReadOnlyList<TableInfo>?)parsed.Tables ?? Array.Empty<TableInfo>();
++        var summary  = PrefixAnalyzer.Analyze(tables);
++
++        Assert.Equal("vel", summary.PrimaryClientPrefix);
++        Assert.False(summary.NoClientPrefixDetected);
++        Assert.Equal(2, summary.ClientPrefixes[0].ComponentCount);
++        // msdyn + cr3a7 → Microsoft bucket (cr3a7 matches ^cr[a-z0-9]*$).
++        Assert.Equal(2, summary.MicrosoftPrefixes.Count);
++        Assert.Contains(summary.MicrosoftPrefixes, p => p.Prefix == "msdyn");
++        Assert.Contains(summary.MicrosoftPrefixes, p => p.Prefix == "cr3a7");
++    }
+ }
+diff --git a/tests/DataverseDocAgent.Tests/DocxBuilderTests.cs b/tests/DataverseDocAgent.Tests/DocxBuilderTests.cs
+index dcb1e6a..d8de251 100644
+--- a/tests/DataverseDocAgent.Tests/DocxBuilderTests.cs
++++ b/tests/DataverseDocAgent.Tests/DocxBuilderTests.cs
+@@ -1,4 +1,6 @@
+ // F-013 — Story 3.5 DocxBuilder tests — section presence + structural validity
++// F-047 — Story 3.6 adds three AC-5 narrative tests + empty-environment guard for
++//         the Publisher Prefix Summary sub-section.
+ using DataverseDocAgent.Api.Documents;
+ using DocumentFormat.OpenXml.Packaging;
+ using DocumentFormat.OpenXml.Wordprocessing;
+@@ -67,6 +69,7 @@ public class DocxBuilderTests
+                 FieldCount        = 0,
+                 RelationshipCount = 0,
+                 KeyObservations   = Array.Empty<string>(),
++                PrefixSummary     = EmptyPrefixSummary(),
+             },
+             Tables        = Array.Empty<TableInfo>(),
+             Fields        = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
+@@ -78,7 +81,12 @@ public class DocxBuilderTests
+         Assert.NotEmpty(bytes);
+         using var ms = new MemoryStream(bytes, writable: false);
+         using var doc = WordprocessingDocument.Open(ms, isEditable: false);
+-        Assert.NotNull(doc.MainDocumentPart!.Document!.Body);
++        var body = doc.MainDocumentPart!.Document!.Body!;
++        Assert.NotNull(body);
++
++        // Story 3.6 AC-7 — for an empty environment the section header is omitted.
++        var text = string.Join("\n", body.Descendants<Text>().Select(t => t.Text ?? string.Empty));
++        Assert.DoesNotContain("Publisher Prefix Summary", text);
+     }
+ 
+     [Fact]
+@@ -99,6 +107,7 @@ public class DocxBuilderTests
+                 KeyObservations   = new string?[] { null, "real observation", "", "   " }!
+                     .Cast<string>()
+                     .ToArray(),
++                PrefixSummary     = EmptyPrefixSummary(),
+             },
+             Tables        = Array.Empty<TableInfo>(),
+             Fields        = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
+@@ -117,6 +126,133 @@ public class DocxBuilderTests
+         Assert.DoesNotContain("• \n",  text);
+     }
+ 
++    // ─── Story 3.6 — AC-5 narrative branches ─────────────────────────────────
++
++    [Fact]
++    public void Build_PublisherPrefixSection_SingleClientPrefix_RendersAllClientCustomisationsSentence()
++    {
++        var summary = new PublisherPrefixSummary
++        {
++            PrimaryClientPrefix    = "vel",
++            MicrosoftPrefixes      = new[]
++            {
++                new PrefixCount("msdyn", 4),
++                new PrefixCount("msft",  1),
++            },
++            ClientPrefixes         = new[] { new PrefixCount("vel", 7) },
++            UnprefixedTables       = Array.Empty<PrefixCount>(),
++            NoClientPrefixDetected = false,
++        };
++
++        var text = RenderText(BuildModelWithPrefix(summary, tableCount: 12));
++
++        Assert.Contains("Publisher Prefix Summary", text);
++        Assert.Contains("All client customisations use the prefix 'vel_'.", text);
++        Assert.Contains("Microsoft components use msdyn_, msft_.", text);
++        Assert.Contains("No third-party ISV components detected.", text);
++        // Breakdown table rows appear AFTER the narrative; anchor the search
++        // past the last narrative sentence so the assertion targets the table.
++        var afterNarrative = text.IndexOf("No third-party ISV components detected.", StringComparison.Ordinal);
++        Assert.True(afterNarrative > 0, "Narrative anchor sentence missing.");
++        var msdynIdx = text.IndexOf("msdyn_", afterNarrative, StringComparison.Ordinal);
++        var msftIdx  = text.IndexOf("msft_",  afterNarrative, StringComparison.Ordinal);
++        var velIdx   = text.IndexOf("vel_",   afterNarrative, StringComparison.Ordinal);
++        Assert.True(msdynIdx > 0 && msftIdx > msdynIdx && velIdx > msftIdx,
++            $"Expected breakdown order msdyn_ → msft_ → vel_, got positions {msdynIdx}/{msftIdx}/{velIdx}.");
++    }
++
++    [Fact]
++    public void Build_PublisherPrefixSection_NoClientPrefix_RendersFallbackSentence()
++    {
++        var summary = new PublisherPrefixSummary
++        {
++            PrimaryClientPrefix    = null,
++            MicrosoftPrefixes      = new[] { new PrefixCount("msdyn", 3) },
++            ClientPrefixes         = Array.Empty<PrefixCount>(),
++            UnprefixedTables       = Array.Empty<PrefixCount>(),
++            NoClientPrefixDetected = true,
++        };
++
++        var text = RenderText(BuildModelWithPrefix(summary, tableCount: 3));
++
++        Assert.Contains("Publisher Prefix Summary", text);
++        Assert.Contains(
++            "No client-defined publisher prefix detected — all custom components use default or Microsoft prefixes.",
++            text);
++    }
++
++    [Fact]
++    public void Build_PublisherPrefixSection_MultipleClientPrefixes_RendersPrimarySentenceAndOrderedTable()
++    {
++        var summary = new PublisherPrefixSummary
++        {
++            PrimaryClientPrefix    = "vel",
++            MicrosoftPrefixes      = new[] { new PrefixCount("msdyn", 2) },
++            ClientPrefixes         = new[]
++            {
++                new PrefixCount("vel", 5),
++                new PrefixCount("acme", 3),
++            },
++            UnprefixedTables       = new[] { new PrefixCount("(no prefix)", 1) },
++            NoClientPrefixDetected = false,
++        };
++
++        var text = RenderText(BuildModelWithPrefix(summary, tableCount: 11));
++
++        Assert.Contains(
++            "Multiple custom prefixes detected — environment may have multiple development teams or migration history.",
++            text);
++        Assert.Contains("Primary client prefix: 'vel_' (5 components).", text);
++        // Breakdown order: Microsoft → Client (vel desc, acme next) → Unprefixed.
++        var msdynIdx = text.IndexOf("msdyn_", StringComparison.Ordinal);
++        var velIdx   = text.IndexOf("vel_'", StringComparison.Ordinal); // primary sentence first
++        // Find the *table-row* vel_ — search after the primary-sentence mention.
++        var velRowIdx  = text.IndexOf("vel_", velIdx + 1, StringComparison.Ordinal);
++        var acmeIdx    = text.IndexOf("acme_", StringComparison.Ordinal);
++        var noPrefIdx  = text.IndexOf("(no prefix)", StringComparison.Ordinal);
++        Assert.True(msdynIdx > 0 && velRowIdx > msdynIdx && acmeIdx > velRowIdx && noPrefIdx > acmeIdx,
++            $"Expected msdyn_ → vel_ → acme_ → (no prefix), got positions {msdynIdx}/{velRowIdx}/{acmeIdx}/{noPrefIdx}.");
++    }
++
++    // ─── Helpers ─────────────────────────────────────────────────────────────
++
++    private static string RenderText(GeneratedDocumentModel model)
++    {
++        var bytes = DocxBuilder.Build(model);
++        using var ms = new MemoryStream(bytes, writable: false);
++        using var doc = WordprocessingDocument.Open(ms, isEditable: false);
++        return string.Join("\n",
++            doc.MainDocumentPart!.Document!.Body!.Descendants<Text>().Select(t => t.Text ?? string.Empty));
++    }
++
++    private static GeneratedDocumentModel BuildModelWithPrefix(PublisherPrefixSummary prefix, int tableCount)
++        => new()
++        {
++            Summary = new ExecutiveSummary
++            {
++                EnvironmentName   = "Branch Test Org",
++                ScanDate          = new DateTime(2026, 5, 14, 12, 0, 0, DateTimeKind.Utc),
++                ComplexityRating  = "Medium",
++                TableCount        = tableCount,
++                FieldCount        = 0,
++                RelationshipCount = 0,
++                KeyObservations   = Array.Empty<string>(),
++                PrefixSummary     = prefix,
++            },
++            Tables        = Array.Empty<TableInfo>(),
++            Fields        = new Dictionary<string, IReadOnlyList<FieldInfo>>(),
++            Relationships = new Dictionary<string, IReadOnlyList<RelationshipInfo>>(),
++        };
++
++    private static PublisherPrefixSummary EmptyPrefixSummary() => new()
++    {
++        PrimaryClientPrefix    = null,
++        MicrosoftPrefixes      = Array.Empty<PrefixCount>(),
++        ClientPrefixes         = Array.Empty<PrefixCount>(),
++        UnprefixedTables       = Array.Empty<PrefixCount>(),
++        NoClientPrefixDetected = true,
++    };
++
+     private static GeneratedDocumentModel BuildSampleModel() => new()
+     {
+         Summary = new ExecutiveSummary
+@@ -131,6 +267,14 @@ public class DocxBuilderTests
+             FieldCount        = 150,
+             RelationshipCount = 18,
+             KeyObservations   = new[] { "First key observation", "Second key observation" },
++            PrefixSummary     = new PublisherPrefixSummary
++            {
++                PrimaryClientPrefix    = "new",
++                MicrosoftPrefixes      = Array.Empty<PrefixCount>(),
++                ClientPrefixes         = new[] { new PrefixCount("new", 1) },
++                UnprefixedTables       = Array.Empty<PrefixCount>(),
++                NoClientPrefixDetected = false,
++            },
+         },
+         Tables = new[]
+         {
+diff --git a/tests/DataverseDocAgent.Tests/PrefixAnalyzerTests.cs b/tests/DataverseDocAgent.Tests/PrefixAnalyzerTests.cs
+new file mode 100644
+index 0000000..b3910cc
+--- /dev/null
++++ b/tests/DataverseDocAgent.Tests/PrefixAnalyzerTests.cs
+@@ -0,0 +1,150 @@
++// F-047 — Story 3.6 PrefixAnalyzer unit tests (AC-8 coverage)
++using DataverseDocAgent.Api.Documents;
++using DataverseDocAgent.Api.Features.DocumentGenerate;
++
++namespace DataverseDocAgent.Tests;
++
++public class PrefixAnalyzerTests
++{
++    [Fact]
++    public void Analyze_SplitsOnFirstUnderscoreEvenWithMultipleSegments()
++    {
++        // AC-8 — logical name with multiple underscores must yield only the
++        // segment before the FIRST underscore. `new_my_widget` → "new".
++        var tables = new[]
++        {
++            Table("new_my_widget"),
++            Table("new_account"),
++        };
++
++        var summary = PrefixAnalyzer.Analyze(tables);
++
++        Assert.Single(summary.ClientPrefixes);
++        Assert.Equal("new", summary.ClientPrefixes[0].Prefix);
++        Assert.Equal(2,     summary.ClientPrefixes[0].ComponentCount);
++    }
++
++    [Theory]
++    [InlineData("msdyn_thing",  true)]
++    [InlineData("msft_widget",  true)]
++    [InlineData("adx_setting",  true)]
++    [InlineData("cr_legacy",    true)]    // bare cr (AC-2 exact set)
++    [InlineData("cr3a7_table",  true)]    // Power Apps default-environment auto-prefix
++    [InlineData("crf2b_table",  true)]
++    [InlineData("crxyz_table",  true)]
++    [InlineData("vel_account",  false)]
++    [InlineData("new_widget",   false)]
++    [InlineData("doc_form",     false)]
++    public void Analyze_BucketsMicrosoftPrefixes(string logicalName, bool expectedMicrosoft)
++    {
++        var summary = PrefixAnalyzer.Analyze(new[] { Table(logicalName) });
++
++        if (expectedMicrosoft)
++        {
++            Assert.Single(summary.MicrosoftPrefixes);
++            Assert.Empty(summary.ClientPrefixes);
++            Assert.True(summary.NoClientPrefixDetected);
++        }
++        else
++        {
++            Assert.Empty(summary.MicrosoftPrefixes);
++            Assert.Single(summary.ClientPrefixes);
++            Assert.False(summary.NoClientPrefixDetected);
++        }
++    }
++
++    [Fact]
++    public void Analyze_TieBreakOnAlphabeticalLowercasePrefix()
++    {
++        // Two client prefixes with the same count — primary is alphabetically
++        // first on the lowercase prefix string (AC-3, deterministic discipline).
++        var tables = new[]
++        {
++            Table("zeta_a"), Table("zeta_b"), Table("zeta_c"),
++            Table("alpha_a"), Table("alpha_b"), Table("alpha_c"),
++        };
++
++        var summary = PrefixAnalyzer.Analyze(tables);
++
++        Assert.Equal("alpha", summary.PrimaryClientPrefix);
++        // ClientPrefixes ordered by count desc, ties by ordinal ascending.
++        Assert.Equal(new[] { "alpha", "zeta" },
++            summary.ClientPrefixes.Select(p => p.Prefix).ToArray());
++    }
++
++    [Fact]
++    public void Analyze_EmptyClientBucket_SetsNoClientPrefixFlag()
++    {
++        var tables = new[]
++        {
++            Table("msdyn_thing"),
++            Table("cr3a7_widget"),
++        };
++
++        var summary = PrefixAnalyzer.Analyze(tables);
++
++        Assert.Null(summary.PrimaryClientPrefix);
++        Assert.True(summary.NoClientPrefixDetected);
++        Assert.Empty(summary.ClientPrefixes);
++        Assert.Equal(2, summary.MicrosoftPrefixes.Sum(p => p.ComponentCount));
++    }
++
++    [Fact]
++    public void Analyze_UnprefixedBucket_RoutesNamesWithoutUnderscore()
++    {
++        // Defensive: list_custom_tables filters on IsCustomEntity=true so an
++        // unprefixed custom table is an artefact. Still bucket it cleanly
++        // rather than emit an empty-string prefix.
++        var tables = new[]
++        {
++            Table("standalonetable"),
++            Table("vel_account"),
++        };
++
++        var summary = PrefixAnalyzer.Analyze(tables);
++
++        Assert.Single(summary.UnprefixedTables);
++        Assert.Equal("(no prefix)", summary.UnprefixedTables[0].Prefix);
++        Assert.Equal(1, summary.UnprefixedTables[0].ComponentCount);
++        Assert.Equal("vel", summary.PrimaryClientPrefix);
++    }
++
++    [Fact]
++    public void Analyze_EmptyInput_ReturnsAllEmptyBucketsAndNoClientFlag()
++    {
++        var summary = PrefixAnalyzer.Analyze(Array.Empty<TableInfo>());
++
++        Assert.Null(summary.PrimaryClientPrefix);
++        Assert.True(summary.NoClientPrefixDetected);
++        Assert.Empty(summary.MicrosoftPrefixes);
++        Assert.Empty(summary.ClientPrefixes);
++        Assert.Empty(summary.UnprefixedTables);
++    }
++
++    [Fact]
++    public void Analyze_MicrosoftAndClientCountsAreInDescendingOrderWithStableTieBreak()
++    {
++        // 3× msdyn_*, 1× cr_*, 2× vel_*, 2× acme_*.
++        var tables = new[]
++        {
++            Table("msdyn_a"), Table("msdyn_b"), Table("msdyn_c"),
++            Table("cr_x"),
++            Table("vel_a"), Table("vel_b"),
++            Table("acme_a"), Table("acme_b"),
++        };
++
++        var summary = PrefixAnalyzer.Analyze(tables);
++
++        Assert.Equal(new[] { "msdyn", "cr" },
++            summary.MicrosoftPrefixes.Select(p => p.Prefix).ToArray());
++        // 2× vs 2× tie → alphabetical asc on prefix: acme before vel.
++        Assert.Equal(new[] { "acme", "vel" },
++            summary.ClientPrefixes.Select(p => p.Prefix).ToArray());
++        Assert.Equal("acme", summary.PrimaryClientPrefix);
++    }
++
++    private static TableInfo Table(string logicalName) => new()
++    {
++        LogicalName = logicalName,
++    };
++}
