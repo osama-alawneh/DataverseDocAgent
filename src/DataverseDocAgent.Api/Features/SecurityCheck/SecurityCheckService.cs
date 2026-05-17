@@ -1,7 +1,6 @@
 // F-029, F-030, F-031 — Permission pre-flight checker service
 // FR-029, FR-030, FR-031 — Missing/extra privilege detection
-using DataverseDocAgent.Api.Common;
-using DataverseDocAgent.Api.Dataverse;
+using DataverseDocAgent.Shared.Dataverse;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;

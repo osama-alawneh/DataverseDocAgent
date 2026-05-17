@@ -1,5 +1,5 @@
-// F-034 — Credential in-memory guarantee (NFR-007)
-namespace DataverseDocAgent.Api.Common;
+// F-034 / NFR-007 — Credential in-memory guarantee
+namespace DataverseDocAgent.Shared.Dataverse;
 
 /// <summary>
 /// Holds Dataverse client-credentials in memory only.

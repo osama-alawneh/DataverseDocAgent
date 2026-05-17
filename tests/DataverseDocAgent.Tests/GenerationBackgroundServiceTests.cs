@@ -1,7 +1,8 @@
 // F-036, NFR-007 — Story 3.1 background service unit tests
 using System.Threading.Channels;
-using DataverseDocAgent.Api.Common;
 using DataverseDocAgent.Api.Jobs;
+using DataverseDocAgent.Shared.Dataverse;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DataverseDocAgent.Tests;
@@ -71,7 +72,8 @@ public class GenerationBackgroundServiceTests
             channel,
             store,
             pipeline,
-            NullLogger<GenerationBackgroundService>.Instance);
+            NullLogger<GenerationBackgroundService>.Instance,
+            new ConfigurationBuilder().Build());
 
         using var hostCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await service.StartAsync(hostCts.Token);
@@ -99,12 +101,12 @@ public class GenerationBackgroundServiceTests
     }
 
     [Fact]
-    public async Task ProcessTaskAsync_HostShutdownCancellation_PropagatesWithoutMarkingFailed()
+    public async Task ProcessTaskAsync_HostShutdownCancellation_FlushesRunningToFailedHostShutdown_AndRethrows()
     {
-        // AC-3 + Dev Notes: OperationCanceledException on host shutdown must rethrow so
-        // the BackgroundService base class stops cleanly — it must NOT collapse into a
-        // generic Failed job record. Pins the `when stoppingToken.IsCancellationRequested`
-        // catch filter against accidental removal.
+        // Story 3.5 — host shutdown must still propagate OperationCanceledException so
+        // BackgroundService stops cleanly, but the in-flight job is flushed to a
+        // terminal Failed/HOST_SHUTDOWN record before the rethrow so polling clients
+        // see a deterministic outcome instead of an indefinite Running.
         var store = new InMemoryJobStore();
         var id = store.CreateJob();
         using var cts = new CancellationTokenSource();
@@ -117,8 +119,50 @@ public class GenerationBackgroundServiceTests
             service.ProcessTaskAsync(new GenerationTask(id, BuildCreds()), cts.Token));
 
         var record = store.GetJob(id)!;
-        Assert.NotEqual(JobStatus.Failed, record.Status);
-        Assert.Null(record.ErrorMessage);
+        Assert.Equal(JobStatus.Failed, record.Status);
+        Assert.Equal("HOST_SHUTDOWN", record.ErrorCode);
+        Assert.True(record.SafeToRetry);
+        Assert.NotNull(record.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ProcessTaskAsync_GenerationFailureException_RecordsCodeAndSafeToRetry()
+    {
+        // Story 3.5 — typed pipeline failures carry the public error code and retry
+        // hint back to the polling client via the job record (NFR-014).
+        var store = new InMemoryJobStore();
+        var id = store.CreateJob();
+        const string SecretFragment = "super-secret-tenant=11111111";
+        var pipeline = new FakePipeline(_ => throw new GenerationFailureException(
+            JobFailureCodes.CredentialRejected, safeToRetry: false,
+            message: SecretFragment));
+        var service = BuildService(store, pipeline);
+
+        await service.ProcessTaskAsync(new GenerationTask(id, BuildCreds()), CancellationToken.None);
+
+        var record = store.GetJob(id)!;
+        Assert.Equal(JobStatus.Failed, record.Status);
+        Assert.Equal("CREDENTIAL_REJECTED", record.ErrorCode);
+        Assert.False(record.SafeToRetry);
+        // NFR-007 — raw exception text is NOT echoed to clients; a sanitised summary is.
+        Assert.NotNull(record.ErrorMessage);
+        Assert.DoesNotContain(SecretFragment, record.ErrorMessage!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProcessTaskAsync_GenericException_DefaultsToGenerationFailedCode()
+    {
+        var store = new InMemoryJobStore();
+        var id = store.CreateJob();
+        var pipeline = new FakePipeline(_ => throw new InvalidOperationException("boom"));
+        var service = BuildService(store, pipeline);
+
+        await service.ProcessTaskAsync(new GenerationTask(id, BuildCreds()), CancellationToken.None);
+
+        var record = store.GetJob(id)!;
+        Assert.Equal(JobStatus.Failed, record.Status);
+        Assert.Equal("GENERATION_FAILED", record.ErrorCode);
+        Assert.False(record.SafeToRetry);
     }
 
     private static GenerationBackgroundService BuildService(IJobStore store, IGenerationPipeline pipeline)
@@ -126,7 +170,8 @@ public class GenerationBackgroundServiceTests
             Channel.CreateUnbounded<GenerationTask>(),
             store,
             pipeline,
-            NullLogger<GenerationBackgroundService>.Instance);
+            NullLogger<GenerationBackgroundService>.Instance,
+            new ConfigurationBuilder().Build());
 
     private static EnvironmentCredentials BuildCreds() => new()
     {

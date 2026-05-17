@@ -39,10 +39,12 @@ public sealed class JobStatusController : ControllerBase
 
         return Ok(new JobStatusResponse
         {
-            JobId = record.JobId,
-            Status = record.Status.ToString().ToLowerInvariant(),
+            JobId         = record.JobId,
+            Status        = record.Status.ToString().ToLowerInvariant(),
             DownloadToken = record.DownloadToken,
-            Error = record.ErrorMessage,
+            Error         = record.ErrorMessage,
+            Code          = record.ErrorCode,
+            SafeToRetry   = record.SafeToRetry,
         });
     }
 }

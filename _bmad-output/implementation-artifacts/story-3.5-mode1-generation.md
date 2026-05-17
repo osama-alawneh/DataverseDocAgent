@@ -1,6 +1,6 @@
 # Story 3.5: Mode 1 — POST /api/document/generate Endpoint and Full Request-to-Download Flow
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -23,82 +23,72 @@ so that the complete request-to-download journey works end-to-end: submit → po
 
 ## Tasks / Subtasks
 
-- [ ] Implement `DocumentGenerateRequest` and response models (AC: 1)
-  - [ ] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateRequest.cs`
+- [x] Implement `DocumentGenerateRequest` and response models (AC: 1)
+  - [x] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateRequest.cs`
     - Properties: `EnvironmentUrl`, `TenantId`, `ClientId`, `ClientSecret` (all required strings)
-  - [ ] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateResponse.cs`
+  - [x] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateResponse.cs`
     - Property: `string JobId`
-- [ ] Implement `DocumentGenerateController` (AC: 1, 2)
-  - [ ] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateController.cs`
-  - [ ] `[HttpPost("api/document/generate")]`
-  - [ ] **NFR-018 — Decorate the generate action with `[EnableRateLimiting(CredentialEndpointsRateLimitOptions.PolicyName)]`** (Story 3.0 AC-4). Action-level, not controller-level. Required for Story 3.0 → `done` gate (AC-11). Add `using DataverseDocAgent.Api.Common;` and `using Microsoft.AspNetCore.RateLimiting;`.
-  - [ ] Validate all four credential fields are present and non-empty → return `{ error: "...", code: "INVALID_REQUEST", safeToRetry: false }` if not
-  - [ ] Build `EnvironmentCredentials` from request body
-  - [ ] Call `IJobStore.CreateJob()` → get `jobId`
-  - [ ] Enqueue `GenerationTask { JobId = jobId, Credentials = credentials }` to the `Channel<GenerationTask>`
-  - [ ] Return `StatusCode(202, new DocumentGenerateResponse { JobId = jobId })`
-  - [ ] Annotate: `// F-036 — FR-036` + `// NFR-018 — Rate-limited via "credential-endpoints" policy (Story 3.0)`
-- [ ] Add `GetOrganisationMetadataTool` (AC: 5)
-  - [ ] Create `src/DataverseDocAgent.Api/Agent/Tools/GetOrganisationMetadataTool.cs`
-  - [ ] `Name = "get_organisation_metadata"`, returns: `{ "environmentName", "environmentUrl", "version", "baseLanguageName" }`
-  - [ ] Queries `Organization` entity for `Name`, `Version`, `BaseCurrencyId.Name`, `LanguageCode`
-  - [ ] Annotate: `// F-011 — FR-011`
-- [ ] Implement complexity rating algorithm in C# (AC: 5)
-  - [ ] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/ComplexityRater.cs`
-  - [ ] Static method: `string Rate(int tableCount, int fieldCount, int relationshipCount)`
-  - [ ] Logic: High if tableCount > 50 OR fieldCount > 500; Medium if tableCount >= 10 OR fieldCount >= 100; else Low
-  - [ ] This is called in `DocumentGenerateService` AFTER tools execute — inputs come from tool results, not from Claude
-- [ ] Implement `DocumentGenerateService` — full pipeline (AC: 3, 4, 5, 9, 10)
-  - [ ] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs`
-  - [ ] Method: `Task RunAsync(GenerationTask task, CancellationToken cancellationToken)`
-  - [ ] This method is called by `GenerationBackgroundService` in place of the placeholder `Task.Delay()`
-  - [ ] Step 1: Stopwatch start
-  - [ ] Step 2: `DataverseConnectionFactory.ConnectAsync(task.Credentials)` — on `DataverseConnectionException`, mark job failed with `CREDENTIAL_REJECTED`, discard credentials, return
-  - [ ] Step 3: Instantiate tools: `ListCustomTablesTool`, `GetTableFieldsTool`, `GetRelationshipsTool`, `GetOrganisationMetadataTool` — all receiving the `ServiceClient`
-  - [ ] Step 4: Build Mode 1 prompt (see Dev Notes for prompt structure)
-  - [ ] Step 5: Call `AgentOrchestrator.RunAsync(prompt, tools, cancellationToken)` — Claude loop executes, calls tools, produces structured JSON
-  - [ ] Step 6: Parse structured JSON from Claude response
-  - [ ] Step 7: Compute `complexityRating` via `ComplexityRater.Rate(tableCount, fieldCount, relCount)`
-  - [ ] Step 8: Inject `complexityRating` and `scanDate` (UTC now) into the parsed output
-  - [ ] Step 9: Call `DocxBuilder.Build(structuredOutput)` → `byte[]`
-  - [ ] Step 10: Call `IDocumentStore.StoreAsync(bytes, TimeSpan.FromHours(24))` → `token`
-  - [ ] Step 11: `IJobStore.UpdateStatus(jobId, Ready, token, null)`
-  - [ ] Step 12: Log elapsed time (Stopwatch.Elapsed.TotalSeconds — no credential data)
-  - [ ] Wrap entire pipeline in try/catch: Dataverse errors → `DATAVERSE_ERROR`; Claude errors → `AI_ERROR`; timeout via `CancellationToken` → `GENERATION_TIMEOUT`
-  - [ ] In all catch blocks: discard credentials (task goes out of scope), mark job failed with the appropriate code
-  - [ ] Annotate: `// F-001, F-002, F-003, F-011, F-013, F-036`
-- [ ] Implement `DocxBuilder` (AC: 6)
-  - [ ] Create `src/DataverseDocAgent.Api/Documents/DocxBuilder.cs`
-  - [ ] Input: a structured C# object (deserialized from Claude's JSON output)
-  - [ ] Output: `byte[]` representing a valid `.docx`
-  - [ ] Use `DocumentFormat.OpenXml` to construct the document
-  - [ ] Section 1 — Executive Summary: heading "Executive Summary", then: environment name, scan date, complexity rating badge (text), counts table (custom tables, fields, relationships), key observations paragraph (from Claude's output)
-  - [ ] Section 2 — Custom Tables: heading per table, then logical name, solution, AI-inferred purpose paragraph
-  - [ ] Section 3 — Field Catalogue: per table, sub-section heading, then a table with columns: Field Name | Logical Name | Type | Required | Description
-  - [ ] Section 4 — Relationship Map: per table, sub-section, then a table with columns: Relationship | Type | Related Table | Cascade Delete | Business Meaning
-  - [ ] Document metadata: author = "DataverseDocAgent", title = "Environment Documentation — {environmentName}"
-  - [ ] Annotate: `// F-013 — FR-013`
-- [ ] Update `GenerationBackgroundService` to call `DocumentGenerateService` (AC: 3, 4, 9)
-  - [ ] Replace the `await Task.Delay(100)` stub from Story 3.1 with `await _documentGenerateService.RunAsync(task, stoppingToken)`
-  - [ ] Inject `DocumentGenerateService` via constructor
-- [ ] Add `CancellationToken` with 10-minute timeout to pipeline (AC: 9)
-  - [ ] In `GenerationBackgroundService`, wrap each task with `CancellationTokenSource(TimeSpan.FromMinutes(10))`
-  - [ ] Link to the service `stoppingToken` so the service shutdown also cancels in-flight tasks
-- [ ] Mode 1 prompt definition (AC: 4, 5)
-  - [ ] Create `src/DataverseDocAgent.Api/Agent/PromptBuilder.cs`
-  - [ ] Method: `string BuildMode1Prompt()`
-  - [ ] Prompt instructs Claude to:
-    1. Call `get_organisation_metadata` first
-    2. Call `list_custom_tables` to get all table logical names
-    3. For each table, call `get_table_fields` and `get_relationships`
-    4. Return a JSON object with keys: `organisation`, `tables` (array), `fields` (object keyed by tableName), `relationships` (object keyed by tableName), `keyObservations` (3–5 bullet points as plain-English strings)
-  - [ ] Prompt explicitly states: "Return your final response as a JSON object only, with no surrounding markdown code fences."
-- [ ] End-to-end integration test (AC: 1, 7, 8, 10)
-  - [ ] POST to `/api/document/generate` with real credentials
-  - [ ] Poll `/api/jobs/{jobId}` until `status: "ready"` or `"failed"`
-  - [ ] If ready: GET `/api/download/{token}`, save file locally, open in Word
-  - [ ] Verify document contains all four sections with real environment content
-  - [ ] Record elapsed time and log entry in `docs/poc-baseline.md`
+- [x] Implement `DocumentGenerateController` (AC: 1, 2)
+  - [x] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateController.cs`
+  - [x] `[HttpPost("api/document/generate")]`
+  - [x] **NFR-018 — Decorate the generate action with `[EnableRateLimiting(CredentialEndpointsRateLimitOptions.PolicyName)]`** (Story 3.0 AC-4). Action-level, not controller-level. Required for Story 3.0 → `done` gate (AC-11). Add `using DataverseDocAgent.Api.Common;` and `using Microsoft.AspNetCore.RateLimiting;`.
+  - [x] Validate all four credential fields are present and non-empty → return `{ error: "...", code: "INVALID_REQUEST", safeToRetry: false }` if not
+  - [x] Build `EnvironmentCredentials` from request body
+  - [x] Call `IJobStore.CreateJob()` → get `jobId`
+  - [x] Enqueue `GenerationTask { JobId = jobId, Credentials = credentials }` to the `Channel<GenerationTask>`
+  - [x] Return `StatusCode(202, new DocumentGenerateResponse { JobId = jobId })`
+  - [x] Annotate: `// F-036 — FR-036` + `// NFR-018 — Rate-limited via "credential-endpoints" policy (Story 3.0)`
+- [x] Add `GetOrganisationMetadataTool` (AC: 5)
+  - [x] Create `src/DataverseDocAgent.Api/Agent/Tools/GetOrganisationMetadataTool.cs`
+  - [x] `Name = "get_organisation_metadata"`, returns: `{ "environmentName", "environmentUrl", "version", "baseLanguageName" }`
+  - [x] Queries `Organization` entity (WhoAmI → Retrieve) for `Name`, `LanguageCode`; uses `RetrieveVersionRequest` for `Version`; `EnvironmentUrl` is injected by the caller because the Organization entity does not expose the public URL.
+  - [x] Annotate: `// F-011 — FR-011`
+- [x] Implement complexity rating algorithm in C# (AC: 5)
+  - [x] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/ComplexityRater.cs`
+  - [x] Static method: `string Rate(int tableCount, int fieldCount, int relationshipCount)`
+  - [x] Logic: High if tableCount > 50 OR fieldCount > 500; Medium if tableCount >= 10 OR fieldCount >= 100; else Low
+  - [x] Called in `DocumentGenerateService` AFTER tools execute — inputs come from tool results, not from Claude
+- [x] Implement `DocumentGenerateService` — full pipeline (AC: 3, 4, 5, 9, 10)
+  - [x] Create `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs` implementing `IGenerationPipeline`
+  - [x] Method: `Task<string> RunAsync(GenerationTask task, CancellationToken cancellationToken)` — returns the download token on success; throws `GenerationFailureException(code, safeToRetry)` for structured failures.
+  - [x] Stopwatch start
+  - [x] `DataverseConnectionFactory.ConnectAsync(task.Credentials)` — on `DataverseConnectionException` throw `GenerationFailureException(CREDENTIAL_REJECTED, safeToRetry=false)`; credentials go out of scope on return
+  - [x] Build four Mode 1 tools via `DataverseToolFactory.CreateMode1Tools(client, environmentUrl)` — includes `GetOrganisationMetadataTool`
+  - [x] Build Mode 1 prompt via `PromptBuilder.BuildMode1Prompt()`
+  - [x] Run `AgentOrchestrator.RunAsync(prompt, tools, ct)` with `maxIterations = Mode1MaxIterations` (200 — POC limit of 10 raised; supports 50+ table environments)
+  - [x] Parse structured JSON (`StripCodeFences` + `JsonSerializer.Deserialize`)
+  - [x] Compute `complexityRating` via `ComplexityRater.Rate(tableCount, fieldCount, relCount)` from parsed arrays
+  - [x] Inject `complexityRating`, `scanDate=DateTime.UtcNow`, counts into the rendered model
+  - [x] Render `byte[]` via `DocxBuilder.Build(model)`
+  - [x] Persist via `IDocumentStore.StoreAsync(bytes, TimeSpan.FromHours(24))`
+  - [x] Log elapsed seconds (no credential data)
+  - [x] Failure code mapping: Dataverse `FaultException`/timeout/HTTP → `DATAVERSE_ERROR`; `Anthropic.SDK.RateLimitsExceeded` and generic agent failure → `AI_ERROR`; orchestrator iteration-cap sentinel → `AI_ERROR`. `GENERATION_TIMEOUT` is raised by the background service when the per-task CTS expires.
+  - [x] Annotate: `// F-001, F-002, F-003, F-011, F-013, F-036`
+- [x] Implement `DocxBuilder` (AC: 6)
+  - [x] Create `src/DataverseDocAgent.Api/Documents/DocxBuilder.cs`
+  - [x] Input: `GeneratedDocumentModel`; output: `byte[]`
+  - [x] Use `DocumentFormat.OpenXml` to construct the document
+  - [x] Section 1 — Executive Summary: environment name, URL, version, language, scan date, complexity rating, counts table, key observations
+  - [x] Section 2 — Custom Tables: heading per table, logical name, schema, solution, description, AI-inferred purpose
+  - [x] Section 3 — Field Catalogue: per-table sub-section + table with `Field Name | Logical Name | Type | Required | Description`
+  - [x] Section 4 — Relationship Map: per-table sub-section + table with `Relationship | Type | Related Table | Cascade Delete | Business Meaning`
+  - [x] Core package metadata: author = "DataverseDocAgent", title = "Environment Documentation — {environmentName}"
+  - [x] Annotate: `// F-013 — FR-013`
+- [x] Update `GenerationBackgroundService` to call `DocumentGenerateService` (AC: 3, 4, 9)
+  - [x] DI registration swap: `IGenerationPipeline → DocumentGenerateService` (Program.cs). Background service unchanged structurally — it consumes `IGenerationPipeline`.
+- [x] Add `CancellationToken` with 10-minute timeout to pipeline (AC: 9)
+  - [x] `GenerationBackgroundService` wraps each task with `CancellationTokenSource.CreateLinkedTokenSource(stoppingToken)` + `CancelAfter(PerTaskTimeout = 10 min)`.
+  - [x] Disambiguate: stoppingToken triggered → `HOST_SHUTDOWN` (safeToRetry=true) + rethrow OCE for clean host stop. Per-task CTS only → `GENERATION_TIMEOUT` (safeToRetry=true).
+- [x] Mode 1 prompt definition (AC: 4, 5)
+  - [x] Create `src/DataverseDocAgent.Api/Agent/PromptBuilder.cs`
+  - [x] Static `BuildMode1Prompt()` — prescribes JSON keys, forbids markdown code fences, forbids Claude inventing `complexityRating`/counts.
+- [x] Job-record schema extended for structured failure codes (NFR-014, deferred-work watchout)
+  - [x] `JobRecord` gains `ErrorCode` + `SafeToRetry`
+  - [x] `IJobStore.UpdateStatus` extended with `errorCode`/`safeToRetry` (default null — keeps existing call-sites compiling)
+  - [x] `JobFailureCodes` constants module (`CREDENTIAL_REJECTED`, `DATAVERSE_ERROR`, `AI_ERROR`, `GENERATION_TIMEOUT`, `HOST_SHUTDOWN`, `GENERATION_FAILED`)
+  - [x] `GenerationFailureException(code, safeToRetry, message?)` carries the typed failure between pipeline and background service
+  - [x] `JobStatusResponse` exposes `code` + `safeToRetry` on the poll endpoint
+- [ ] End-to-end integration test (AC: 1, 7, 8, 10) — DEFERRED to in-environment manual verification; requires live Dataverse + Anthropic creds. Logging hook in place (`Mode 1 generation completed for job {JobId} in {ElapsedSeconds:F1}s`) for `docs/poc-baseline.md` capture during the manual run.
 
 ## Dev Notes
 
@@ -149,3 +139,82 @@ claude-sonnet-4-6
 ### Completion Notes List
 
 ### File List
+
+**Created:**
+- `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateRequest.cs`
+- `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateResponse.cs`
+- `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateController.cs`
+- `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs`
+- `src/DataverseDocAgent.Api/Features/DocumentGenerate/ComplexityRater.cs`
+- `src/DataverseDocAgent.Api/Agent/Tools/GetOrganisationMetadataTool.cs`
+- `src/DataverseDocAgent.Api/Agent/PromptBuilder.cs`
+- `src/DataverseDocAgent.Api/Documents/DocxBuilder.cs`
+- `src/DataverseDocAgent.Api/Documents/GeneratedDocumentModel.cs`
+- `src/DataverseDocAgent.Api/Jobs/JobFailureCodes.cs`
+- `src/DataverseDocAgent.Api/Jobs/GenerationFailureException.cs`
+- `tests/DataverseDocAgent.Tests/ComplexityRaterTests.cs`
+- `tests/DataverseDocAgent.Tests/DocumentGenerateControllerTests.cs`
+- `tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs`
+- `tests/DataverseDocAgent.Tests/DocxBuilderTests.cs`
+- `tests/DataverseDocAgent.Tests/PromptBuilderTests.cs`
+
+**Modified:**
+- `src/DataverseDocAgent.Api/Agent/AgentOrchestrator.cs` — configurable `maxIterations` + `Mode1MaxIterations = 200` constant
+- `src/DataverseDocAgent.Api/Agent/Tools/DataverseToolFactory.cs` — wires `GetOrganisationMetadataTool` as the 4th Mode 1 tool, accepts `environmentUrl`
+- `src/DataverseDocAgent.Api/Features/DocumentGenerate/JobStatusController.cs` — exposes `code` + `safeToRetry`
+- `src/DataverseDocAgent.Api/Features/DocumentGenerate/JobStatusResponse.cs` — adds `code` + `safeToRetry`
+- `src/DataverseDocAgent.Api/Jobs/GenerationBackgroundService.cs` — per-task 10-minute timeout, host-shutdown drain, structured `GenerationFailureException` translation
+- `src/DataverseDocAgent.Api/Jobs/IJobStore.cs` — `UpdateStatus` gains `errorCode` + `safeToRetry`
+- `src/DataverseDocAgent.Api/Jobs/InMemoryJobStore.cs` — propagates new fields
+- `src/DataverseDocAgent.Api/Jobs/JobRecord.cs` — adds `ErrorCode` + `SafeToRetry`
+- `src/DataverseDocAgent.Api/Program.cs` — registers `AnthropicClient`, `Func<AgentOrchestrator>`, swaps `StubGenerationPipeline → DocumentGenerateService`
+- `tests/DataverseDocAgent.Tests/DataverseToolFactoryTests.cs` — expects 4 Mode 1 tools
+- `tests/DataverseDocAgent.Tests/GenerationBackgroundServiceTests.cs` — host-shutdown drain + new failure-code coverage
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — story 3-5 → review
+
+### Change Log
+
+- 2026-05-14 — Initial implementation. POST /api/document/generate end-to-end pipeline: rate-limited controller → bounded background worker → connection test → 4-tool agent loop → deterministic complexity rating → DocxBuilder → InMemoryDocumentStore. Job-record schema extended with structured error codes + retry hints (NFR-014). 28 new unit tests added; suite: 195 passed / 0 failed.
+- 2026-05-14 — Applied code review patches P1–P12 (host-shutdown race guard, channel-write recovery, null-safe bullets, asymmetric code-fence strip fix, missing-API-key warning, negative LCID handling, sibling-tool error contract, baseLanguageName fallback, pre-store cancellation check, NFR-007 logging tightening, AC-10 finally-block timing, additional tests).
+
+### Review Findings
+
+Multi-agent adversarial review (Blind Hunter + Edge Case Hunter + Acceptance Auditor) on commit 7407def, 2026-05-14.
+
+**Patches (resolved in follow-up commit):**
+
+- [x] [Review][Patch] P1 — Terminal-state guard on `InMemoryJobStore.UpdateStatus` so a `Ready` job cannot be silently overwritten by a late `Failed` (host-shutdown race) [src/DataverseDocAgent.Api/Jobs/InMemoryJobStore.cs]
+- [x] [Review][Patch] P2 — Wrap `Channel.Writer.WriteAsync` in `DocumentGenerateController` so a write failure marks the just-created job `Failed` instead of orphaning it as `Queued` [src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateController.cs]
+- [x] [Review][Patch] P3 — `DocxBuilder` null-safes bullet/text rendering so a `keyObservations` list containing a literal JSON `null` does not NRE the OpenXml pipeline [src/DataverseDocAgent.Api/Documents/DocxBuilder.cs]
+- [x] [Review][Patch] P4 — `StripCodeFences` only strips a trailing ` ``` ` when a matching leading fence was found (prevents corruption of a fence-less JSON body ending with literal backticks) [src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs]
+- [x] [Review][Patch] P5 — Startup-time warning when `Anthropic:ApiKey` is missing so the AI_ERROR fallback is observable [src/DataverseDocAgent.Api/Program.cs]
+- [x] [Review][Patch] P6 — `ResolveLanguageName` catches `ArgumentOutOfRangeException` in addition to `CultureNotFoundException` so a corrupted negative LCID does not escape the tool boundary [src/DataverseDocAgent.Api/Agent/Tools/GetOrganisationMetadataTool.cs]
+- [x] [Review][Patch] P7 — Generic `Exception` catch added to `GetOrganisationMetadataTool.ExecuteAsync` matching sibling-tool error contract (`{ error }`) [src/DataverseDocAgent.Api/Agent/Tools/GetOrganisationMetadataTool.cs]
+- [x] [Review][Patch] P8 — `BaseLanguageName` falls back to `"LCID {n}"` when the OS culture table cannot resolve the language, matching the inline comment's promise [src/DataverseDocAgent.Api/Agent/Tools/GetOrganisationMetadataTool.cs]
+- [x] [Review][Patch] P9 — `ct.ThrowIfCancellationRequested()` before `IDocumentStore.StoreAsync` so a timeout cannot orphan a 24h blob [src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs]
+- [x] [Review][Patch] P10 — Failure logging drops the `LogError(ex, ...)` auto-expansion of the inner-exception chain so SDK exception text (potentially carrying tenant id / authority URL fragments) does not reach Serilog (NFR-007) [src/DataverseDocAgent.Api/Jobs/GenerationBackgroundService.cs]
+- [x] [Review][Patch] P11 — Elapsed-time log moved to `finally` so AC-10 baseline measurement captures failure-mode durations, not just success [src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs]
+- [x] [Review][Patch] P12 — Tests added: 24h TTL flows into `IDocumentStore.StoreAsync`, controller never lands credentials in the logger scope [tests/DataverseDocAgent.Tests/]
+
+**Deferred (recorded in deferred-work.md):**
+
+- [x] [Review][Defer] Queued-but-not-dequeued jobs are silently dropped on host shutdown (Channel.Writer.Complete() not called by anyone) — pre-existing Story 3.1 architecture
+- [x] [Review][Defer] Synchronous Dataverse SDK tool calls ignore the per-task `CancellationToken` (SDK v1.2.10 limitation; Story 3.4 F4 carry-over) — AC-9 timeout cannot interrupt a hung tool until it returns
+- [x] [Review][Defer] No automated assertion for AC-1 `<2s` response SLO — covered by deferred manual E2E
+- [x] [Review][Defer] `Channel<GenerationTask>` is unbounded (Story 3.1 carry-over) — bounded-channel decision still open
+
+**Dismissed (noise / acknowledged scope / works-by-accident):** 18 findings — Word-style heading vs inline runs, bullet glyph vs Word numbering, GUID/URL shape validation (works by failing at SDK boundary with CREDENTIAL_REJECTED), DateTime tick race in core props XML, AC-4 "three vs four tools" wording drift (already updated in Tasks), AC-9 enum literal vs HOST_SHUTDOWN/GENERATION_FAILED additions (NFR-014 spirit), zero-table-env Low rating, environment URL echoed via tool (not secret), iteration-cap sentinel string-compare brittleness, RetrieveVersionResponse.Version null/whitespace handling, etc.
+
+### Completion Notes List
+
+- AC-1: controller validates required fields, returns 202 + `{ jobId }` on success; integration test (deferred) covers <2s SLO.
+- AC-2: credentials handed to `EnvironmentCredentials` only — never logged. `CredentialDestructuringPolicy` clamps Serilog. Tested for redaction.
+- AC-3: connection test runs first; `DataverseConnectionException` → `CREDENTIAL_REJECTED` `safeToRetry=false`. Credentials go out of scope on failure path.
+- AC-4: `DataverseToolFactory.CreateMode1Tools` now returns four tools wired to the per-request `ServiceClient`. Prompt prescribes JSON shape.
+- AC-5: `ComplexityRater.Rate` deterministic; called in service AFTER tool counts known. Tested across all thresholds.
+- AC-6: `DocxBuilder` produces sections 1–4. `DocxBuilderTests` opens the package via `WordprocessingDocument.Open` and asserts section headings + structural validity.
+- AC-7: success path stores via `IDocumentStore.StoreAsync(bytes, 24h)`, marks job `Ready` with token. `JobStatusController` returns `{ status, downloadToken }`.
+- AC-8: pre-existing `DownloadController` returns the bytes with correct headers — no change required.
+- AC-9: failure-code mapping: `CREDENTIAL_REJECTED` (factory), `DATAVERSE_ERROR` (SDK fault/timeout), `AI_ERROR` (orchestrator/rate-limit/parse), `GENERATION_TIMEOUT` (per-task CTS), `HOST_SHUTDOWN` (stoppingToken). All paths discard credentials by scope.
+- AC-10: elapsed seconds logged on success. End-to-end manual run will populate `docs/poc-baseline.md`.
+- **Deferred:** bounded vs unbounded channel decision (Story 3.1 carry-over); manual E2E integration against a real environment (requires live creds + Anthropic key).

@@ -14,7 +14,19 @@ namespace DataverseDocAgent.Api.Agent;
 /// </summary>
 public sealed class AgentOrchestrator
 {
-    private const int MaxIterations = 10;
+    /// <summary>Default iteration ceiling used by the POC console host.</summary>
+    public const int DefaultMaxIterations = 10;
+
+    /// <summary>
+    /// Iteration ceiling for Mode 1 in the API host. Large environments with 50+
+    /// custom tables trigger 100+ tool calls (2 calls per table for fields and
+    /// relationships, plus organisation metadata + list_custom_tables) — the POC
+    /// limit of 10 is insufficient. 200 covers realistic environments with
+    /// headroom while still preventing runaway loops.
+    /// </summary>
+    public const int Mode1MaxIterations = 200;
+
+    private readonly int _maxIterations;
 
     /// <summary>
     /// Returned when the agent loop exhausts all iterations without reaching end_turn.
@@ -27,16 +39,20 @@ public sealed class AgentOrchestrator
 
     // ── Public constructor (production) ───────────────────────────────────────
 
-    public AgentOrchestrator(AnthropicClient client)
-        : this((p, ct) => client.Messages.GetClaudeMessageAsync(p, ct))
+    public AgentOrchestrator(AnthropicClient client, int maxIterations = DefaultMaxIterations)
+        : this((p, ct) => client.Messages.GetClaudeMessageAsync(p, ct), maxIterations)
     { }
 
     // ── Delegate constructor (testing / advanced DI) ──────────────────────────
 
     public AgentOrchestrator(
-        Func<MessageParameters, CancellationToken, Task<MessageResponse>> sendMessage)
+        Func<MessageParameters, CancellationToken, Task<MessageResponse>> sendMessage,
+        int maxIterations = DefaultMaxIterations)
     {
         _sendMessage = sendMessage ?? throw new ArgumentNullException(nameof(sendMessage));
+        if (maxIterations < 1)
+            throw new ArgumentOutOfRangeException(nameof(maxIterations), maxIterations, "must be >= 1");
+        _maxIterations = maxIterations;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -59,17 +75,37 @@ public sealed class AgentOrchestrator
             new() { Role = RoleType.User, Content = [new TextContent { Text = prompt }] },
         };
 
-        for (int iteration = 0; iteration < MaxIterations; iteration++)
+        // E2E hotfix 2026-05-14 (R-HF-8) — per-iteration progress log.
+        // Mode 1 in 200+ table envs runs hundreds of round-trips; without
+        // a heartbeat we cannot tell whether a >10 min generation is
+        // legitimately progressing (many tool calls) or stuck. Logging
+        // iteration number, tool name(s), and elapsed time gives a clear
+        // forensic trail when the job timeout fires.
+        var loopStart = DateTimeOffset.UtcNow;
+        for (int iteration = 0; iteration < _maxIterations; iteration++)
         {
             var parameters = new MessageParameters
             {
                 Model     = AnthropicModels.Claude46Sonnet,
-                MaxTokens = 4096,
+                // E2E hotfix 2026-05-14 (R-HF-7) — 16384 was still too low
+                // for envs with 200+ tables: a 67k-char Mode 1 final JSON
+                // hit the cap mid-stream and surfaced as AI_ERROR with
+                // inner JsonException. Sonnet 4.6 caps max_tokens at
+                // 64000 for non-thinking output; that ceiling covers the
+                // largest realistic Phase 1 environment with headroom.
+                // Token cost is metered by output actually produced, not
+                // the budget, so raising the cap does not raise spend on
+                // smaller envs.
+                MaxTokens = 64000,
                 Messages  = messages,
                 Tools     = sdkTools,
             };
 
             var response = await _sendMessage(parameters, ct).ConfigureAwait(false);
+
+            var elapsedSec = (DateTimeOffset.UtcNow - loopStart).TotalSeconds;
+            Console.Error.WriteLine(
+                $"[AgentOrchestrator] iter={iteration + 1}/{_maxIterations} stop={response.StopReason} elapsed={elapsedSec:F1}s");
 
             if (string.Equals(response.StopReason, "tool_use", StringComparison.Ordinal))
             {
@@ -89,6 +125,9 @@ public sealed class AgentOrchestrator
                 });
 
                 // Execute every tool_use block and collect results
+                var toolNames = string.Join(",", toolUseBlocks.Select(b => b.Name));
+                Console.Error.WriteLine(
+                    $"[AgentOrchestrator]   tools=[{toolNames}] count={toolUseBlocks.Count}");
                 var toolResults = new List<ContentBase>();
                 foreach (var block in toolUseBlocks)
                 {
@@ -103,10 +142,25 @@ public sealed class AgentOrchestrator
                     {
                         try
                         {
-                            resultJson = await tool.ExecuteAsync(inputElement).ConfigureAwait(false);
+                            resultJson = await tool.ExecuteAsync(inputElement, ct).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                        {
+                            // Caller cancellation must short-circuit the loop — swallowing it
+                            // into a tool_result JSON would keep the agent pumping tokens past
+                            // the deadline and defeat the orchestrator's cancellation contract.
+                            throw;
                         }
                         catch (Exception ex)
                         {
+                            // R-HF-9 — surface tool-level failures with type +
+                            // message + first stack frame. Previously these were
+                            // silently swallowed into the JSON returned to Claude;
+                            // the user only ever saw `Tool 'X' failed: TypeName`
+                            // in the agent transcript and never the SDK reason.
+                            var firstFrame = ex.StackTrace?.Split('\n').FirstOrDefault()?.Trim() ?? "(no stack)";
+                            Console.Error.WriteLine(
+                                $"[AgentOrchestrator]   tool '{block.Name}' threw {ex.GetType().FullName}: {ex.Message} @ {firstFrame}");
                             resultJson = JsonSerializer.Serialize(new { error = $"Tool '{block.Name}' failed: {ex.GetType().Name}" });
                         }
                     }
@@ -126,12 +180,23 @@ public sealed class AgentOrchestrator
                 continue;
             }
 
-            // end_turn (or any other stop reason) — return final text (AC-7)
+            // end_turn (or any other stop reason) — return final text (AC-7).
+            // E2E hotfix 2026-05-14 (R-HF-7) — surface non-end_turn stop
+            // reasons explicitly. "max_tokens" means Claude hit MaxTokens
+            // mid-response and the JSON is truncated; downstream parse
+            // will fail with JsonException. Logging here names the cause
+            // without waiting for the forensic dump in DocumentGenerateService.
+            if (!string.Equals(response.StopReason, "end_turn", StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine(
+                    $"[AgentOrchestrator] Warning: final response StopReason='{response.StopReason}' (expected 'end_turn'). " +
+                    "If 'max_tokens', the output was truncated — raise MaxTokens or shrink the prompt.");
+            }
             return ExtractText(response);
         }
 
         // Max iterations reached — log warning and return sentinel
-        Console.Error.WriteLine($"[AgentOrchestrator] Warning: agent loop reached the maximum iteration limit ({MaxIterations}).");
+        Console.Error.WriteLine($"[AgentOrchestrator] Warning: agent loop reached the maximum iteration limit ({_maxIterations}).");
         return MaxIterationsSentinel;
     }
 

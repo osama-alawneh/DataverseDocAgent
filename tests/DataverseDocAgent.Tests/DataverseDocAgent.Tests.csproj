@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DataverseDocAgent.Api\DataverseDocAgent.Api.csproj" />
+    <ProjectReference Include="..\..\src\DataverseDocAgent.Shared\DataverseDocAgent.Shared.csproj" />
   </ItemGroup>
 
 </Project>

@@ -50,7 +50,7 @@ public class AgentOrchestratorTests
         toolMock.Setup(t => t.InputSchema)
                 .Returns(JsonSerializer.Deserialize<JsonElement>("""{"type":"object","properties":{}}"""));
         toolMock
-            .Setup(t => t.ExecuteAsync(It.IsAny<JsonElement>()))
+            .Setup(t => t.ExecuteAsync(It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(toolResult);
 
         var orchestrator = new AgentOrchestrator(Sender);
@@ -59,7 +59,7 @@ public class AgentOrchestratorTests
             [toolMock.Object]);
 
         // Tool must have been called exactly once
-        toolMock.Verify(t => t.ExecuteAsync(It.IsAny<JsonElement>()), Times.Once);
+        toolMock.Verify(t => t.ExecuteAsync(It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()), Times.Once);
         Assert.Contains("Final answer", result);
         Assert.Equal(2, callCount);
     }
@@ -79,7 +79,7 @@ public class AgentOrchestratorTests
         toolMock.Setup(t => t.InputSchema)
                 .Returns(JsonSerializer.Deserialize<JsonElement>("""{"type":"object","properties":{}}"""));
         toolMock
-            .Setup(t => t.ExecuteAsync(It.IsAny<JsonElement>()))
+            .Setup(t => t.ExecuteAsync(It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("{}");
 
         int callCount = 0;
@@ -120,7 +120,7 @@ public class AgentOrchestratorTests
         toolMock.Setup(t => t.InputSchema)
                 .Returns(JsonSerializer.Deserialize<JsonElement>("""{"type":"object","properties":{}}"""));
         toolMock
-            .Setup(t => t.ExecuteAsync(It.IsAny<JsonElement>()))
+            .Setup(t => t.ExecuteAsync(It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
 
         var orchestrator = new AgentOrchestrator(Sender);

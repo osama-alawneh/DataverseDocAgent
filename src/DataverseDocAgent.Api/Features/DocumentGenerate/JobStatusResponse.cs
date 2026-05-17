@@ -1,4 +1,4 @@
-// F-036, FR-036, NFR-014 — Job status success response (Story 3.1)
+// F-036, FR-036, NFR-014 — Job status success response (Story 3.1, extended in Story 3.5)
 using System.Text.Json.Serialization;
 
 namespace DataverseDocAgent.Api.Features.DocumentGenerate;
@@ -20,4 +20,12 @@ public sealed class JobStatusResponse
 
     [JsonPropertyName("error")]
     public string? Error { get; init; }
+
+    /// <summary>Machine-readable failure code (Story 3.5). Null for non-Failed jobs.</summary>
+    [JsonPropertyName("code")]
+    public string? Code { get; init; }
+
+    /// <summary>NFR-014 retry hint. Null for non-Failed jobs.</summary>
+    [JsonPropertyName("safeToRetry")]
+    public bool? SafeToRetry { get; init; }
 }

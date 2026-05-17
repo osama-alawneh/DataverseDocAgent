@@ -4,11 +4,15 @@
 
 using System.Threading.Channels;
 using System.Threading.RateLimiting;
+using Anthropic.SDK;
+using DataverseDocAgent.Api.Agent;
 using DataverseDocAgent.Api.Common;
-using DataverseDocAgent.Api.Dataverse;
+using DataverseDocAgent.Api.Features.DocumentGenerate;
 using DataverseDocAgent.Api.Features.SecurityCheck;
+using DataverseDocAgent.Shared.Dataverse;
 using DataverseDocAgent.Api.Jobs;
 using DataverseDocAgent.Api.Middleware;
+using DataverseDocAgent.Api.Storage;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
@@ -54,8 +58,16 @@ builder.Services.AddControllers()
     });
 builder.Services.AddEndpointsApiExplorer();
 
-// F-029, F-030, F-031 — Permission checker services (Story 2.2)
-builder.Services.AddScoped<IDataverseConnectionFactory, DataverseConnectionFactory>();
+// F-029, F-030, F-031 — Permission checker services (Story 2.2).
+// IDataverseConnectionFactory is Singleton because the implementation is
+// stateless (no instance fields; constructs a fresh ServiceClient per
+// ConnectAsync call). Singleton lifetime is required so the Singleton
+// `IGenerationPipeline` / hosted `GenerationBackgroundService` can consume
+// it without tripping the .NET 8 ValidateScopes check at startup
+// (Scoped → Singleton capture is the classic captive-dependency bug).
+// `SecurityCheckService` stays Scoped — it has request-scoped logger state
+// and consumes the now-Singleton factory cleanly (Scoped → Singleton is OK).
+builder.Services.AddSingleton<IDataverseConnectionFactory, DataverseConnectionFactory>();
 builder.Services.AddScoped<SecurityCheckService>();
 
 // F-036 — Async job infrastructure (Story 3.1).
@@ -67,8 +79,41 @@ builder.Services.AddSingleton<IJobStore, InMemoryJobStore>();
 // not captured at module-load time. Prevents a stale, Complete()'d channel surviving
 // across WebApplicationFactory instances in tests.
 builder.Services.AddSingleton(_ => Channel.CreateUnbounded<GenerationTask>());
-builder.Services.AddSingleton<IGenerationPipeline, StubGenerationPipeline>();
+// Story 3.5 — DocumentGenerateService is the real pipeline; replaces StubGenerationPipeline.
+builder.Services.AddSingleton<IGenerationPipeline, DocumentGenerateService>();
 builder.Services.AddHostedService<GenerationBackgroundService>();
+
+// Story 3.5 — Anthropic client + orchestrator factory.
+// AnthropicClient is registered lazily so a missing key does not block startup —
+// the failure surfaces on first generation request as AI_ERROR, where it can be
+// observed and retried, rather than as a fatal host startup crash that blocks
+// the security-check endpoint (which has no Anthropic dependency).
+//
+// E2E hotfix 2026-05-14 (R-HF-6) — the SDK's default HttpClient has
+// `Timeout = 100s`. Mode 1 final-iteration completions on real environments
+// routinely exceed that (one call observed at 123.7s on user's env →
+// AI_ERROR inner=TaskCanceledException). Inject a longer-timeout HttpClient
+// so per-Anthropic-call timeout fits within the NFR-001 envelope (Large = 10
+// min total Mode 1 budget). The outer per-task token in
+// GenerationBackgroundService still bounds wall-clock for the whole job.
+builder.Services.AddSingleton<AnthropicClient>(sp =>
+{
+    var apiKey = sp.GetRequiredService<IConfiguration>()["Anthropic:ApiKey"] ?? string.Empty;
+    var http   = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+    return new AnthropicClient(new Anthropic.SDK.APIAuthentication(apiKey), http, null!);
+});
+builder.Services.AddSingleton<Func<AgentOrchestrator>>(sp => () =>
+    new AgentOrchestrator(
+        sp.GetRequiredService<AnthropicClient>(),
+        maxIterations: AgentOrchestrator.Mode1MaxIterations));
+
+// F-040, NFR-013 — Document store (Story 3.2, Phase 1).
+// IMemoryCache is itself a singleton; the store holds a reference to it, so the
+// store must also be a singleton. AddScoped here would silently leak per-request
+// instances while appearing to work because IMemoryCache state is still shared.
+// Phase 2+: swap to BlobDocumentStore here — no other code changes required (AC-3).
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<IDocumentStore, InMemoryDocumentStore>();
 
 // NFR-018, NFR-014, NFR-007 — Rate limiting on credential-accepting endpoints (Story 3.0)
 // Fail-fast config binding: ValidateOnStart surfaces out-of-range PermitLimit/WindowSeconds
@@ -136,6 +181,17 @@ app.MapControllers();
 
 // NFR-006 — Health endpoint for uptime measurement (no auth required)
 app.MapGet("/api/health", () => Results.Ok(new { status = "healthy" }));
+
+// Story 3.5 code-review P5 — surface a missing Anthropic key at startup so
+// generation requests don't silently end as AI_ERROR forever. The DI singleton
+// itself is registered lazily; this is observability only.
+var anthropicKey = builder.Configuration["Anthropic:ApiKey"];
+if (string.IsNullOrWhiteSpace(anthropicKey))
+{
+    Log.Warning(
+        "Anthropic:ApiKey is not configured — all /api/document/generate requests will fail with AI_ERROR. " +
+        "Set it via dotnet user-secrets or appsettings.{Environment}.json.");
+}
 
 // Log startup confirmation
 Log.Information("DataverseDocAgent.Api started successfully");
