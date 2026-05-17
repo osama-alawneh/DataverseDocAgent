@@ -2,6 +2,7 @@
 using System.Threading.Channels;
 using DataverseDocAgent.Api.Jobs;
 using DataverseDocAgent.Shared.Dataverse;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DataverseDocAgent.Tests;
@@ -71,7 +72,8 @@ public class GenerationBackgroundServiceTests
             channel,
             store,
             pipeline,
-            NullLogger<GenerationBackgroundService>.Instance);
+            NullLogger<GenerationBackgroundService>.Instance,
+            new ConfigurationBuilder().Build());
 
         using var hostCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await service.StartAsync(hostCts.Token);
@@ -168,7 +170,8 @@ public class GenerationBackgroundServiceTests
             Channel.CreateUnbounded<GenerationTask>(),
             store,
             pipeline,
-            NullLogger<GenerationBackgroundService>.Instance);
+            NullLogger<GenerationBackgroundService>.Instance,
+            new ConfigurationBuilder().Build());
 
     private static EnvironmentCredentials BuildCreds() => new()
     {

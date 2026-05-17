@@ -91,6 +91,9 @@ public sealed class DocumentGenerateService : IGenerationPipeline
                 }
                 catch (FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> ex)
                 {
+                    _logger.LogWarning(
+                        "Pipeline forensic dump (Dataverse FaultException) for job {JobId}:\n{Forensics}",
+                        task.JobId, FormatExceptionForLog(ex));
                     outcome = JobFailureCodes.DataverseError;
                     throw new GenerationFailureException(
                         JobFailureCodes.DataverseError,
@@ -106,6 +109,9 @@ public sealed class DocumentGenerateService : IGenerationPipeline
                 // beats `when`-pattern-matching for readability.
                 catch (Anthropic.SDK.RateLimitsExceeded ex)
                 {
+                    _logger.LogWarning(
+                        "Pipeline forensic dump (Anthropic 429) for job {JobId}:\n{Forensics}",
+                        task.JobId, FormatExceptionForLog(ex));
                     outcome = JobFailureCodes.AiError;
                     throw new GenerationFailureException(
                         JobFailureCodes.AiError,
@@ -117,15 +123,28 @@ public sealed class DocumentGenerateService : IGenerationPipeline
                                                 or CommunicationException
                                                 or System.Net.Http.HttpRequestException)
                 {
-                    outcome = JobFailureCodes.DataverseError;
+                    // R-HF-9 — split Anthropic-side network faults out of the
+                    // DATAVERSE_ERROR bucket. Both SDKs throw HttpRequestException
+                    // for transport errors; without this disambiguation an
+                    // Anthropic 5xx is mis-labelled as a Dataverse fault.
+                    var isAnthropic = IsAnthropicNetworkFault(ex);
+                    var code = isAnthropic ? JobFailureCodes.AiError : JobFailureCodes.DataverseError;
+                    var label = isAnthropic ? "Anthropic network failure" : "Dataverse network failure";
+                    _logger.LogWarning(
+                        "Pipeline forensic dump ({Label}) for job {JobId}:\n{Forensics}",
+                        label, task.JobId, FormatExceptionForLog(ex));
+                    outcome = code;
                     throw new GenerationFailureException(
-                        JobFailureCodes.DataverseError,
+                        code,
                         safeToRetry: true,
-                        "Network failure during environment scan.",
+                        $"{label} during environment scan.",
                         ex);
                 }
                 catch (Exception ex)
                 {
+                    _logger.LogWarning(
+                        "Pipeline forensic dump (unclassified) for job {JobId}:\n{Forensics}",
+                        task.JobId, FormatExceptionForLog(ex));
                     outcome = JobFailureCodes.AiError;
                     throw new GenerationFailureException(
                         JobFailureCodes.AiError,
@@ -404,6 +423,56 @@ public sealed class DocumentGenerateService : IGenerationPipeline
             raw.AsSpan(0, headChars),
             $"… [{elided} chars elided] …",
             raw.AsSpan(raw.Length - tailChars, tailChars));
+    }
+
+    // E2E hotfix 2026-05-14 (R-HF-9) — full exception forensics for unexpected
+    // pipeline failures. Prior logs surfaced only `inner=TypeName`, which made
+    // mis-classified network faults (e.g. Anthropic 5xx looking like
+    // Dataverse HttpRequestException) indistinguishable on the wire. Trade:
+    // ex.Message and StackTrace may contain tenant/host fragments — acceptable
+    // for a dev-time POC, must be scrubbed before production. NFR-007 still
+    // holds for credentials: we never authenticate via URL params, so client
+    // secrets never appear in URI strings, and ServiceClient does not echo
+    // ClientSecret in exception text.
+    internal static string FormatExceptionForLog(Exception ex)
+    {
+        var sb = new System.Text.StringBuilder();
+        var depth = 0;
+        for (Exception? cur = ex; cur is not null && depth < 4; cur = cur.InnerException, depth++)
+        {
+            sb.Append("  [").Append(depth).Append("] ")
+              .Append(cur.GetType().FullName)
+              .Append(" (Source=").Append(cur.Source ?? "?").Append(")\n")
+              .Append("      Message: ").Append(cur.Message).Append('\n');
+            if (cur.StackTrace is { Length: > 0 } st)
+            {
+                sb.Append("      Stack:\n");
+                foreach (var line in st.Split('\n'))
+                {
+                    sb.Append("        ").Append(line.TrimEnd('\r')).Append('\n');
+                }
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// R-HF-9 — heuristic to detect HttpRequestException that originated inside
+    /// the Anthropic SDK rather than the Dataverse client. Inspects Source
+    /// (assembly) and stack trace. Returns true when the network fault is
+    /// AI-side, so the caller routes it to AI_ERROR instead of
+    /// DATAVERSE_ERROR.
+    /// </summary>
+    internal static bool IsAnthropicNetworkFault(Exception ex)
+    {
+        for (Exception? cur = ex; cur is not null; cur = cur.InnerException)
+        {
+            if (cur.Source?.StartsWith("Anthropic", StringComparison.OrdinalIgnoreCase) == true)
+                return true;
+            if (cur.StackTrace?.Contains("Anthropic.SDK", StringComparison.Ordinal) == true)
+                return true;
+        }
+        return false;
     }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<T>> CoerceDict<T>(

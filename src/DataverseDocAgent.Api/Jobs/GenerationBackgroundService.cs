@@ -19,23 +19,39 @@ namespace DataverseDocAgent.Api.Jobs;
 /// </summary>
 public sealed class GenerationBackgroundService : BackgroundService
 {
-    private static readonly TimeSpan PerTaskTimeout = TimeSpan.FromMinutes(10);
+    // E2E hotfix 2026-05-14 (R-HF-8) — PRD AC-9 codifies 10 minutes, but real
+    // Phase 1 environments with 200+ tables produce 400+ Mode 1 tool calls
+    // plus a multi-minute final-response stream that pushes total wall-clock
+    // past the original ceiling. Default raised to 30 min; configurable via
+    // `Generation:PerTaskTimeoutMinutes` so the cap can be tuned without a
+    // rebuild and adjusted upward for very large envs or downward for CI.
+    private static readonly TimeSpan DefaultPerTaskTimeout = TimeSpan.FromMinutes(30);
 
     private readonly Channel<GenerationTask> _channel;
     private readonly IJobStore _jobStore;
     private readonly IGenerationPipeline _pipeline;
     private readonly ILogger<GenerationBackgroundService> _logger;
+    private readonly TimeSpan _perTaskTimeout;
 
     public GenerationBackgroundService(
         Channel<GenerationTask> channel,
         IJobStore jobStore,
         IGenerationPipeline pipeline,
-        ILogger<GenerationBackgroundService> logger)
+        ILogger<GenerationBackgroundService> logger,
+        IConfiguration configuration)
     {
         _channel = channel;
         _jobStore = jobStore;
         _pipeline = pipeline;
         _logger = logger;
+
+        var configuredMinutes = configuration.GetValue<int?>("Generation:PerTaskTimeoutMinutes");
+        _perTaskTimeout = configuredMinutes is > 0
+            ? TimeSpan.FromMinutes(configuredMinutes.Value)
+            : DefaultPerTaskTimeout;
+        _logger.LogInformation(
+            "GenerationBackgroundService: per-task timeout = {Minutes} min",
+            _perTaskTimeout.TotalMinutes);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -56,7 +72,7 @@ public sealed class GenerationBackgroundService : BackgroundService
         // AC-9 — per-task 10-minute deadline. Linking with stoppingToken means host
         // shutdown also cancels in-flight pipeline work — disambiguated below.
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        timeoutCts.CancelAfter(PerTaskTimeout);
+        timeoutCts.CancelAfter(_perTaskTimeout);
 
         try
         {
@@ -83,7 +99,7 @@ public sealed class GenerationBackgroundService : BackgroundService
             // AC-9 — per-task timeout. SafeToRetry=true: timing-only failure, no
             // mutation occurred client-side.
             _logger.LogWarning("Generation task {JobId} exceeded {Minutes}-minute timeout",
-                task.JobId, PerTaskTimeout.TotalMinutes);
+                task.JobId, _perTaskTimeout.TotalMinutes);
             _jobStore.UpdateStatus(task.JobId, JobStatus.Failed,
                 downloadToken: null,
                 errorMessage:  "Generation exceeded the configured timeout.",
