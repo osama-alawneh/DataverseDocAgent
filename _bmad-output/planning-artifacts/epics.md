@@ -564,12 +564,14 @@ So that Claude can call them during Mode 1 generation to gather all required env
 **Given** `GetTableFieldsTool` is registered with the agent
 **When** Claude calls `get_table_fields` with a `tableName` parameter
 **Then** the tool queries all attributes where `IsCustomAttribute = true` for that table
-**And** returns: display name, logical name, data type, required level, default value (if set), and for OptionSet fields, all option values with integer codes and display labels
+**And** returns: display name, logical name, data type, required level, description
+**Note (R-HF-10, amended 2026-06-23 via correct-course):** picklist `options[]` and `defaultValue` are NOT emitted — `PromptBuilder.cs:52-65` never consumes them. See `_bmad-output/planning-artifacts/sprint-change-proposal-2026-06-23.md` for the scope reduction rationale (Phase 2.5 context-bloat fix). Picklist option labels, if ever required by a Mode 1 consumer, will be scoped to a dedicated `get_picklist_options(tableName, fieldName)` tool under Epic 4.
 
 **Given** `GetRelationshipsTool` is registered with the agent
 **When** Claude calls `get_relationships` with a `tableName` parameter
 **Then** the tool returns all 1:N and N:N relationships where `IsCustomRelationship = true` for that table
-**And** returns: relationship type, schema name, both participating table logical names, and cascade behaviour for delete/assign/share/unshare
+**And** returns: relationship type, schema name, the related (non-self) table logical name, and cascade-on-delete behaviour
+**Note (R-HF-10, amended 2026-06-23 via correct-course):** the `referencingEntity`/`referencedEntity` pair is replaced by singular `relatedEntity` (parent table is implicit from the relationships dictionary key) and the assign/share/unshare cascade fields are dropped — PromptBuilder consumes only `cascadeDelete`. See `_bmad-output/planning-artifacts/sprint-change-proposal-2026-06-23.md`. Full cascade quad, if ever required, will be scoped to a dedicated `get_relationship_cascade(schemaName)` tool under Epic 4.
 
 **For all three tools:**
 **Given** credentials are invalid at tool execution time
