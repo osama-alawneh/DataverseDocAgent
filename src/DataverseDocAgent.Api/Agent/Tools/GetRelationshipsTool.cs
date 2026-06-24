@@ -12,12 +12,16 @@ namespace DataverseDocAgent.Api.Agent.Tools;
 /// <summary>
 /// Returns all custom relationships (1:N where the supplied table is referencing or
 /// referenced, and N:N where it is Entity1 or Entity2) for the supplied table.
-/// 1:N entries carry a <c>cascadeConfiguration</c> object whose four fields
-/// (delete / assign / share / unshare) are always present as <see cref="CascadeType"/>
-/// strings — null cascade slots are reported as <c>"NoCascade"</c> so consumers see a
-/// uniform shape. Any SDK fault is converted into the structured error JSON shape
-/// <c>{ "error", "tableName" }</c> so the agent loop receives a tool result rather
-/// than an exception (NFR-007 / AC-5).
+/// Per R-HF-10 the output is slimmed to what <see cref="PromptBuilder"/> lines 59-65
+/// consume: <c>schemaName</c>, <c>relationshipType</c>, <c>relatedEntity</c> (the
+/// NON-self table on the edge — owning side is implicit because PromptBuilder emits
+/// the entry under the owning table's key), and <c>cascadeDelete</c> (mapped from
+/// <see cref="CascadeConfiguration.Delete"/>, defaulted to <c>"NoCascade"</c> when
+/// the SDK leaves it null). The dropped <c>cascadeConfiguration</c> quad
+/// (assign/share/unshare) and the <c>referencingEntity</c>/<c>referencedEntity</c>
+/// pair are NOT emitted. Any SDK fault is converted into the structured error JSON
+/// shape <c>{ "error", "tableName" }</c> so the agent loop receives a tool result
+/// rather than an exception (NFR-007 / AC-5).
 /// </summary>
 public sealed class GetRelationshipsTool : IDataverseTool
 {
@@ -153,18 +157,28 @@ public sealed class GetRelationshipsTool : IDataverseTool
             // Defensive: SDK should already restrict to edges touching the supplied
             // table, but the AC names this filter explicitly. Cheap guard prevents a
             // future SDK or query refactor silently widening the result set.
-            if (!string.Equals(r.ReferencingEntity, tableName, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(r.ReferencedEntity, tableName, StringComparison.OrdinalIgnoreCase))
-                continue;
+            var isReferenced  = string.Equals(r.ReferencedEntity,  tableName, StringComparison.OrdinalIgnoreCase);
+            var isReferencing = string.Equals(r.ReferencingEntity, tableName, StringComparison.OrdinalIgnoreCase);
+            if (!isReferenced && !isReferencing) continue;
             if (r.SchemaName is not null && !seen.Add(r.SchemaName)) continue;
+
+            // R-HF-10: the owning table is the dictionary key in PromptBuilder's
+            // `relationships` map, so the related side is the OTHER end of the edge.
+            // If the requested table is the referenced (parent) side, the related
+            // entity is the referencing (child); otherwise it's the referenced.
+            // Self-referencing edges collapse to the same string either way.
+            var relatedEntity = isReferenced ? r.ReferencingEntity : r.ReferencedEntity;
 
             sink.Add(new OneToManyDto
             {
-                RelationshipType    = "OneToMany",
-                SchemaName          = r.SchemaName,
-                ReferencingEntity   = r.ReferencingEntity,
-                ReferencedEntity    = r.ReferencedEntity,
-                CascadeConfiguration = MapCascade(r.CascadeConfiguration),
+                RelationshipType = "OneToMany",
+                SchemaName       = r.SchemaName,
+                RelatedEntity    = relatedEntity,
+                // R-HF-10: cascadeConfiguration quad collapsed to a single cascadeDelete
+                // string — PromptBuilder consumes only the delete behaviour. Null
+                // CascadeConfiguration defaults to "NoCascade" so Claude always sees
+                // a deterministic non-null value (Review Patch P11 semantics retained).
+                CascadeDelete    = (r.CascadeConfiguration?.Delete ?? CascadeType.NoCascade).ToString(),
             });
         }
     }
@@ -179,32 +193,23 @@ public sealed class GetRelationshipsTool : IDataverseTool
         foreach (var r in rels)
         {
             if (r.IsCustomRelationship != true) continue;
-            if (!string.Equals(r.Entity1LogicalName, tableName, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(r.Entity2LogicalName, tableName, StringComparison.OrdinalIgnoreCase))
-                continue;
+            var isEntity1 = string.Equals(r.Entity1LogicalName, tableName, StringComparison.OrdinalIgnoreCase);
+            var isEntity2 = string.Equals(r.Entity2LogicalName, tableName, StringComparison.OrdinalIgnoreCase);
+            if (!isEntity1 && !isEntity2) continue;
             if (r.SchemaName is not null && !seen.Add(r.SchemaName)) continue;
+
+            // R-HF-10: emit the OTHER end of the N:N edge. If the requested table is
+            // entity1, the related is entity2; otherwise entity1. Self-N:N collapses.
+            var relatedEntity = isEntity1 ? r.Entity2LogicalName : r.Entity1LogicalName;
 
             sink.Add(new ManyToManyDto
             {
-                RelationshipType   = "ManyToMany",
-                SchemaName         = r.SchemaName,
-                Entity1LogicalName = r.Entity1LogicalName,
-                Entity2LogicalName = r.Entity2LogicalName,
+                RelationshipType = "ManyToMany",
+                SchemaName       = r.SchemaName,
+                RelatedEntity    = relatedEntity,
             });
         }
     }
-
-    private static CascadeDto MapCascade(CascadeConfiguration? cfg) =>
-        // AC-3 says all four cascade behaviours must be present as strings. SDK
-        // returns null for any unset field; collapse to "NoCascade" so consumers
-        // never see a missing cascade slot.
-        new()
-        {
-            Delete  = (cfg?.Delete  ?? CascadeType.NoCascade).ToString(),
-            Assign  = (cfg?.Assign  ?? CascadeType.NoCascade).ToString(),
-            Share   = (cfg?.Share   ?? CascadeType.NoCascade).ToString(),
-            Unshare = (cfg?.Unshare ?? CascadeType.NoCascade).ToString(),
-        };
 
     private record struct TableNameRead(string? TableName, string? Error);
 
@@ -234,26 +239,16 @@ public sealed class GetRelationshipsTool : IDataverseTool
 
     private sealed class OneToManyDto
     {
-        public string?      RelationshipType     { get; set; }
-        public string?      SchemaName           { get; set; }
-        public string?      ReferencingEntity    { get; set; }
-        public string?      ReferencedEntity     { get; set; }
-        public CascadeDto?  CascadeConfiguration { get; set; }
+        public string? RelationshipType { get; set; }
+        public string? SchemaName       { get; set; }
+        public string? RelatedEntity    { get; set; }
+        public string? CascadeDelete    { get; set; }
     }
 
     private sealed class ManyToManyDto
     {
-        public string? RelationshipType   { get; set; }
-        public string? SchemaName         { get; set; }
-        public string? Entity1LogicalName { get; set; }
-        public string? Entity2LogicalName { get; set; }
-    }
-
-    private sealed class CascadeDto
-    {
-        public string? Delete  { get; set; }
-        public string? Assign  { get; set; }
-        public string? Share   { get; set; }
-        public string? Unshare { get; set; }
+        public string? RelationshipType { get; set; }
+        public string? SchemaName       { get; set; }
+        public string? RelatedEntity    { get; set; }
     }
 }

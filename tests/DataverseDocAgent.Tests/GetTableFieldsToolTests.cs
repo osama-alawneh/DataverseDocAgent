@@ -46,7 +46,7 @@ public class GetTableFieldsToolTests
         Assert.Contains("tableName", requiredNames);
     }
 
-    // ── AC-2: returns expected fields per attribute ───────────────────────────
+    // ── AC-2 (R-HF-10): returns the five PromptBuilder-consumed fields per attribute ─
 
     [Fact]
     public async Task ExecuteAsync_WithCustomAttributes_ReturnsExpectedFields()
@@ -55,6 +55,7 @@ public class GetTableFieldsToolTests
         SetAttributeType(attr, AttributeTypeCode.String);
         SetRequiredLevel(attr, AttributeRequiredLevel.ApplicationRequired);
         SetLabel(attr, nameof(AttributeMetadata.DisplayName), "Name");
+        SetLabel(attr, nameof(AttributeMetadata.Description), "Customer display name");
 
         var svcMock = new Mock<IOrganizationService>();
         svcMock.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
@@ -72,13 +73,16 @@ public class GetTableFieldsToolTests
         Assert.Equal("Name",     f.GetProperty("displayName").GetString());
         Assert.Equal("String",   f.GetProperty("attributeType").GetString());
         Assert.Equal("ApplicationRequired", f.GetProperty("requiredLevel").GetString());
+        Assert.Equal("Customer display name", f.GetProperty("description").GetString());
     }
 
-    // ── AC-2: PicklistAttributeMetadata emits options[] ───────────────────────
+    // ── AC-2 (R-HF-10): negative — picklist columns NEVER emit options[] ──────
 
     [Fact]
-    public async Task ExecuteAsync_PicklistAttribute_EmitsOptionsArray()
+    public async Task ExecuteAsync_PicklistAttribute_NeverEmitsOptionsArray()
     {
+        // Set up a real PicklistAttributeMetadata WITH a populated OptionSet so we
+        // would notice if the slim regressed and started emitting `options` again.
         var attr = new PicklistAttributeMetadata { LogicalName = "new_status" };
         SetAttributeType(attr, AttributeTypeCode.Picklist);
         attr.OptionSet = BuildOptionSet(("Active", 1), ("Inactive", 2));
@@ -91,41 +95,20 @@ public class GetTableFieldsToolTests
         var json = await tool.ExecuteAsync(InputFor("new_mytable"));
 
         var f = JsonDocument.Parse(json).RootElement.GetProperty("fields")[0];
-        Assert.True(f.TryGetProperty("options", out var options));
-        Assert.Equal(2, options.GetArrayLength());
-
-        // Order from OptionSet must be preserved — Claude relies on stable schema for diff/audit.
-        Assert.Equal("Active",   options[0].GetProperty("label").GetString());
-        Assert.Equal(1,          options[0].GetProperty("value").GetInt32());
-        Assert.Equal("Inactive", options[1].GetProperty("label").GetString());
-        Assert.Equal(2,          options[1].GetProperty("value").GetInt32());
+        Assert.False(f.TryGetProperty("options", out _),
+            "R-HF-10: picklist attributes must not emit an options array");
     }
 
-    [Fact]
-    public async Task ExecuteAsync_MultiSelectPicklistAttribute_EmitsOptionsArray()
-    {
-        var attr = new MultiSelectPicklistAttributeMetadata { LogicalName = "new_tags" };
-        SetAttributeType(attr, AttributeTypeCode.Virtual);
-        attr.OptionSet = BuildOptionSet(("Red", 10), ("Green", 20), ("Blue", 30));
-
-        var svcMock = new Mock<IOrganizationService>();
-        svcMock.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
-               .Returns(BuildMetadataResponse("new_mytable", attr));
-
-        var tool = new GetTableFieldsTool(svcMock.Object);
-        var json = await tool.ExecuteAsync(InputFor("new_mytable"));
-
-        var f = JsonDocument.Parse(json).RootElement.GetProperty("fields")[0];
-        Assert.Equal(3, f.GetProperty("options").GetArrayLength());
-    }
-
-    // ── AC-2: non-picklist attributes do not include options[] ────────────────
+    // ── AC-2 (R-HF-10): negative — boolean OptionSet must NOT surface as options[] ─
 
     [Fact]
-    public async Task ExecuteAsync_StringAttribute_DoesNotEmitOptionsArray()
+    public async Task ExecuteAsync_BooleanAttribute_NeverEmitsOptionsArray()
     {
-        var attr = new StringAttributeMetadata { LogicalName = "new_name" };
-        SetAttributeType(attr, AttributeTypeCode.String);
+        var attr = new BooleanAttributeMetadata { LogicalName = "new_active" };
+        SetAttributeType(attr, AttributeTypeCode.Boolean);
+        attr.OptionSet = new BooleanOptionSetMetadata(
+            new OptionMetadata(new Label("Yes", 1033), 1),
+            new OptionMetadata(new Label("No",  1033), 0));
 
         var svcMock = new Mock<IOrganizationService>();
         svcMock.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
@@ -136,7 +119,28 @@ public class GetTableFieldsToolTests
 
         var f = JsonDocument.Parse(json).RootElement.GetProperty("fields")[0];
         Assert.False(f.TryGetProperty("options", out _),
-            "String attributes must not include an options array");
+            "R-HF-10: boolean attributes must not emit True/False options");
+    }
+
+    // ── AC-2 (R-HF-10): negative — defaultValue NEVER emitted, even when SDK has one ─
+
+    [Fact]
+    public async Task ExecuteAsync_BooleanAttributeWithDefault_NeverEmitsDefaultValue()
+    {
+        var attr = new BooleanAttributeMetadata { LogicalName = "new_active" };
+        SetAttributeType(attr, AttributeTypeCode.Boolean);
+        SetNonPublic(attr, nameof(BooleanAttributeMetadata.DefaultValue), (bool?)true);
+
+        var svcMock = new Mock<IOrganizationService>();
+        svcMock.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+               .Returns(BuildMetadataResponse("new_mytable", attr));
+
+        var tool = new GetTableFieldsTool(svcMock.Object);
+        var json = await tool.ExecuteAsync(InputFor("new_mytable"));
+
+        var f = JsonDocument.Parse(json).RootElement.GetProperty("fields")[0];
+        Assert.False(f.TryGetProperty("defaultValue", out _),
+            "R-HF-10: defaultValue must never appear in the slimmed payload");
     }
 
     // ── AC-5: table-not-found returns structured error JSON ───────────────────
@@ -248,71 +252,6 @@ public class GetTableFieldsToolTests
         Assert.Equal("anything", root.GetProperty("tableName").GetString());
     }
 
-    // Patch P5 — BooleanAttributeMetadata exposes BooleanOptionSetMetadata
-    // (not OptionSetMetadata); reflection-based capture would silently drop
-    // the True/False option labels.
-    [Fact]
-    public async Task ExecuteAsync_BooleanAttribute_EmitsTrueFalseOptions()
-    {
-        var attr = new BooleanAttributeMetadata { LogicalName = "new_active" };
-        SetAttributeType(attr, AttributeTypeCode.Boolean);
-        attr.OptionSet = new BooleanOptionSetMetadata(
-            new OptionMetadata(new Label("Yes", 1033), 1),
-            new OptionMetadata(new Label("No",  1033), 0));
-
-        var svcMock = new Mock<IOrganizationService>();
-        svcMock.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
-               .Returns(BuildMetadataResponse("new_mytable", attr));
-
-        var tool = new GetTableFieldsTool(svcMock.Object);
-        var json = await tool.ExecuteAsync(InputFor("new_mytable"));
-
-        var f = JsonDocument.Parse(json).RootElement.GetProperty("fields")[0];
-        Assert.True(f.TryGetProperty("options", out var options));
-        Assert.Equal(2, options.GetArrayLength());
-    }
-
-    // Patch P6 — OptionDto.Value must preserve a legitimate value=0 and not
-    // collapse it with null. State.Active is 0; a coerced default would
-    // make value-zero and value-missing indistinguishable.
-    [Fact]
-    public async Task ExecuteAsync_OptionWithValueZero_PreservesZero()
-    {
-        var attr = new PicklistAttributeMetadata { LogicalName = "new_state" };
-        SetAttributeType(attr, AttributeTypeCode.Picklist);
-        attr.OptionSet = BuildOptionSet(("Active", 0), ("Inactive", 1));
-
-        var svcMock = new Mock<IOrganizationService>();
-        svcMock.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
-               .Returns(BuildMetadataResponse("new_mytable", attr));
-
-        var tool = new GetTableFieldsTool(svcMock.Object);
-        var json = await tool.ExecuteAsync(InputFor("new_mytable"));
-
-        var first = JsonDocument.Parse(json).RootElement
-            .GetProperty("fields")[0].GetProperty("options")[0];
-        Assert.Equal(0, first.GetProperty("value").GetInt32());
-    }
-
-    // Patch P12 / AC-2 — defaultValue projection for boolean attributes.
-    [Fact]
-    public async Task ExecuteAsync_BooleanAttributeWithDefault_EmitsDefaultValue()
-    {
-        var attr = new BooleanAttributeMetadata { LogicalName = "new_active" };
-        SetAttributeType(attr, AttributeTypeCode.Boolean);
-        SetNonPublic(attr, nameof(BooleanAttributeMetadata.DefaultValue), (bool?)true);
-
-        var svcMock = new Mock<IOrganizationService>();
-        svcMock.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
-               .Returns(BuildMetadataResponse("new_mytable", attr));
-
-        var tool = new GetTableFieldsTool(svcMock.Object);
-        var json = await tool.ExecuteAsync(InputFor("new_mytable"));
-
-        var f = JsonDocument.Parse(json).RootElement.GetProperty("fields")[0];
-        Assert.Equal("True", f.GetProperty("defaultValue").GetString());
-    }
-
     // Patch P14 — distinguish missing param from wrong type so debug logs
     // for malformed Claude tool calls are not misleading.
     [Fact]
@@ -330,7 +269,7 @@ public class GetTableFieldsToolTests
     [Theory]
     [InlineData("Bad_Casing")]
     [InlineData("has space")]
-    [InlineData("name\u00A0with\u00A0nbsp")]
+    [InlineData("name with nbsp")]
     [InlineData("special!chars")]
     public async Task ExecuteAsync_InvalidLogicalName_ReturnsValidationError(string raw)
     {

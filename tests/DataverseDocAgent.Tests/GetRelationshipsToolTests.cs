@@ -39,20 +39,18 @@ public class GetRelationshipsToolTests
         Assert.Contains("tableName", requiredNames);
     }
 
-    // ── AC-3: 1:N relationships are returned with cascade config ──────────────
+    // ── AC-3 (R-HF-10): 1:N from referenced-side emits relatedEntity = referencing ─
 
     [Fact]
-    public async Task ExecuteAsync_OneToMany_ReturnsRelationshipsWithCascadeConfig()
+    public async Task ExecuteAsync_OneToMany_FromReferencedSide_RelatedEntityIsReferencing()
     {
+        // The supplied table ("account") is the REFERENCED (parent) side, so the
+        // related (non-self) end is the REFERENCING (child) entity.
         var rel = BuildOneToMany(
             schemaName:        "new_account_contact",
             referencingEntity: "contact",
             referencedEntity:  "account",
-            cascade:           BuildCascade(
-                                   delete:  CascadeType.Cascade,
-                                   assign:  CascadeType.NoCascade,
-                                   share:   CascadeType.Cascade,
-                                   unshare: CascadeType.Cascade));
+            cascade:           BuildCascade(delete: CascadeType.Cascade));
 
         var entity = BuildEntityMetadata("account",
             oneToMany: new[] { rel });
@@ -67,30 +65,30 @@ public class GetRelationshipsToolTests
         var rels = JsonDocument.Parse(json).RootElement.GetProperty("relationships");
         Assert.Equal(1, rels.GetArrayLength());
         var r = rels[0];
-        Assert.Equal("OneToMany",          r.GetProperty("relationshipType").GetString());
+        Assert.Equal("OneToMany",           r.GetProperty("relationshipType").GetString());
         Assert.Equal("new_account_contact", r.GetProperty("schemaName").GetString());
-        Assert.Equal("contact",             r.GetProperty("referencingEntity").GetString());
-        Assert.Equal("account",             r.GetProperty("referencedEntity").GetString());
-
-        var cascade = r.GetProperty("cascadeConfiguration");
-        Assert.Equal("Cascade",   cascade.GetProperty("delete").GetString());
-        Assert.Equal("NoCascade", cascade.GetProperty("assign").GetString());
-        Assert.Equal("Cascade",   cascade.GetProperty("share").GetString());
-        Assert.Equal("Cascade",   cascade.GetProperty("unshare").GetString());
+        Assert.Equal("contact",             r.GetProperty("relatedEntity").GetString());
+        Assert.Equal("Cascade",             r.GetProperty("cascadeDelete").GetString());
     }
 
-    // ── AC-3: ManyToOne (this table is the child) is also surfaced as OneToMany ──
+    // ── AC-3 (R-HF-10): same edge queried from the referencing side flips relatedEntity ─
 
     [Fact]
-    public async Task ExecuteAsync_ManyToOne_AlsoIncludedAsOneToMany()
+    public async Task ExecuteAsync_OneToMany_FromReferencingSide_RelatedEntityIsReferenced()
     {
+        // SAME schemaName / endpoints as the previous test, but this time the
+        // supplied table ("contact") is the REFERENCING (child) side, so the
+        // related end is the REFERENCED (parent) entity. Verifies the
+        // "owning-table-is-implicit" semantic is correctly oriented from BOTH
+        // sides of the edge.
         var rel = BuildOneToMany(
-            schemaName:        "new_parent_child",
-            referencingEntity: "child_table",
-            referencedEntity:  "parent_table",
-            cascade:           BuildCascade());
+            schemaName:        "new_account_contact",
+            referencingEntity: "contact",
+            referencedEntity:  "account",
+            cascade:           BuildCascade(delete: CascadeType.Cascade));
 
-        var entity = BuildEntityMetadata("child_table",
+        // Surfaces under ManyToOneRelationships from the child's perspective.
+        var entity = BuildEntityMetadata("contact",
             manyToOne: new[] { rel });
 
         var svc = new Mock<IOrganizationService>();
@@ -98,18 +96,19 @@ public class GetRelationshipsToolTests
            .Returns(BuildRetrieveEntityResponse(entity));
 
         var tool = new GetRelationshipsTool(svc.Object);
-        var json = await tool.ExecuteAsync(InputFor("child_table"));
+        var json = await tool.ExecuteAsync(InputFor("contact"));
 
         var r = JsonDocument.Parse(json).RootElement.GetProperty("relationships")[0];
-        Assert.Equal("OneToMany",      r.GetProperty("relationshipType").GetString());
-        Assert.Equal("child_table",    r.GetProperty("referencingEntity").GetString());
-        Assert.Equal("parent_table",   r.GetProperty("referencedEntity").GetString());
+        Assert.Equal("OneToMany",           r.GetProperty("relationshipType").GetString());
+        Assert.Equal("new_account_contact", r.GetProperty("schemaName").GetString());
+        Assert.Equal("account",             r.GetProperty("relatedEntity").GetString());
+        Assert.Equal("Cascade",             r.GetProperty("cascadeDelete").GetString());
     }
 
     // ── AC-3: N:N relationships ───────────────────────────────────────────────
 
     [Fact]
-    public async Task ExecuteAsync_ManyToMany_ReturnsRelationship()
+    public async Task ExecuteAsync_ManyToMany_FromEntity1Side_RelatedEntityIsEntity2()
     {
         var rel = BuildManyToMany(
             schemaName:          "new_users_groups",
@@ -129,8 +128,102 @@ public class GetRelationshipsToolTests
         var r = JsonDocument.Parse(json).RootElement.GetProperty("relationships")[0];
         Assert.Equal("ManyToMany",       r.GetProperty("relationshipType").GetString());
         Assert.Equal("new_users_groups", r.GetProperty("schemaName").GetString());
-        Assert.Equal("user",             r.GetProperty("entity1LogicalName").GetString());
-        Assert.Equal("group",            r.GetProperty("entity2LogicalName").GetString());
+        Assert.Equal("group",            r.GetProperty("relatedEntity").GetString());
+    }
+
+    // ── AC-3 (R-HF-10): N:N flip — when queried from entity2, relatedEntity = entity1 ─
+
+    [Fact]
+    public async Task ExecuteAsync_ManyToMany_FromEntity2Side_RelatedEntityIsEntity1()
+    {
+        var rel = BuildManyToMany(
+            schemaName:          "new_users_groups",
+            entity1LogicalName:  "user",
+            entity2LogicalName:  "group");
+
+        var entity = BuildEntityMetadata("group",
+            manyToMany: new[] { rel });
+
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+           .Returns(BuildRetrieveEntityResponse(entity));
+
+        var tool = new GetRelationshipsTool(svc.Object);
+        var json = await tool.ExecuteAsync(InputFor("group"));
+
+        var r = JsonDocument.Parse(json).RootElement.GetProperty("relationships")[0];
+        Assert.Equal("user", r.GetProperty("relatedEntity").GetString());
+    }
+
+    // ── AC-3 (R-HF-10): negative — cascadeConfiguration NEVER appears ─────────
+
+    [Fact]
+    public async Task ExecuteAsync_OneToMany_NeverEmitsCascadeConfigurationObject()
+    {
+        var rel = BuildOneToMany(
+            "new_a", "child", "parent",
+            BuildCascade(
+                delete:  CascadeType.Cascade,
+                assign:  CascadeType.Cascade,
+                share:   CascadeType.Cascade,
+                unshare: CascadeType.Cascade));
+
+        var entity = BuildEntityMetadata("parent", oneToMany: new[] { rel });
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+           .Returns(BuildRetrieveEntityResponse(entity));
+
+        var tool = new GetRelationshipsTool(svc.Object);
+        var json = await tool.ExecuteAsync(InputFor("parent"));
+
+        var r = JsonDocument.Parse(json).RootElement.GetProperty("relationships")[0];
+        Assert.False(r.TryGetProperty("cascadeConfiguration", out _),
+            "R-HF-10: cascadeConfiguration object must not appear in the slimmed payload");
+        Assert.False(r.TryGetProperty("assign",  out _), "assign slot must be dropped");
+        Assert.False(r.TryGetProperty("share",   out _), "share slot must be dropped");
+        Assert.False(r.TryGetProperty("unshare", out _), "unshare slot must be dropped");
+    }
+
+    // ── AC-3 (R-HF-10): negative — referencingEntity + referencedEntity NEVER appear ─
+
+    [Fact]
+    public async Task ExecuteAsync_OneToMany_NeverEmitsReferencingOrReferencedEntity()
+    {
+        var rel = BuildOneToMany("new_a", "child", "parent", BuildCascade());
+        var entity = BuildEntityMetadata("parent", oneToMany: new[] { rel });
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+           .Returns(BuildRetrieveEntityResponse(entity));
+
+        var tool = new GetRelationshipsTool(svc.Object);
+        var json = await tool.ExecuteAsync(InputFor("parent"));
+
+        var r = JsonDocument.Parse(json).RootElement.GetProperty("relationships")[0];
+        Assert.False(r.TryGetProperty("referencingEntity", out _),
+            "R-HF-10: referencingEntity must not appear in the slimmed payload");
+        Assert.False(r.TryGetProperty("referencedEntity", out _),
+            "R-HF-10: referencedEntity must not appear in the slimmed payload");
+    }
+
+    // ── AC-3 (R-HF-10): negative — entity1LogicalName + entity2LogicalName NEVER appear on N:N ─
+
+    [Fact]
+    public async Task ExecuteAsync_ManyToMany_NeverEmitsEntity1OrEntity2()
+    {
+        var rel = BuildManyToMany("new_users_groups", "user", "group");
+        var entity = BuildEntityMetadata("user", manyToMany: new[] { rel });
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+           .Returns(BuildRetrieveEntityResponse(entity));
+
+        var tool = new GetRelationshipsTool(svc.Object);
+        var json = await tool.ExecuteAsync(InputFor("user"));
+
+        var r = JsonDocument.Parse(json).RootElement.GetProperty("relationships")[0];
+        Assert.False(r.TryGetProperty("entity1LogicalName", out _),
+            "R-HF-10: entity1LogicalName must not appear on N:N output");
+        Assert.False(r.TryGetProperty("entity2LogicalName", out _),
+            "R-HF-10: entity2LogicalName must not appear on N:N output");
     }
 
     // ── AC-3: filter out non-custom relationships ─────────────────────────────
@@ -329,15 +422,14 @@ public class GetRelationshipsToolTests
         Assert.Equal(0, JsonDocument.Parse(json).RootElement.GetProperty("relationships").GetArrayLength());
     }
 
-    // Patch P11 / AC-3 — all four cascade slots must be present even when SDK
-    // returns null cascade fields. NoCascade is the safe default per CascadeType enum.
+    // Patch P11 (R-HF-10 retained) — null CascadeConfiguration must still produce
+    // a deterministic "NoCascade" string on cascadeDelete so Claude never sees a
+    // missing cascade slot. Verifies the null-fallback semantic survived the
+    // collapse of the four-field quad to a single cascadeDelete.
     [Fact]
-    public async Task ExecuteAsync_NullCascadeFields_DefaultedToNoCascadeStrings()
+    public async Task ExecuteAsync_NullCascadeConfiguration_DefaultsCascadeDeleteToNoCascade()
     {
-        // BuildCascade defaults all four to NoCascade — but the spec requires the
-        // shape to hold even when CascadeConfiguration itself is unset on the SDK.
-        var cascadeWithNulls = new CascadeConfiguration(); // all properties null
-        var rel = BuildOneToMany("new_null_cascade", "child", "parent", cascadeWithNulls);
+        var rel = BuildOneToMany("new_null_cascade", "child", "parent", cascade: null);
 
         var entity = BuildEntityMetadata("parent", oneToMany: new[] { rel });
         var svc = new Mock<IOrganizationService>();
@@ -347,12 +439,8 @@ public class GetRelationshipsToolTests
         var tool = new GetRelationshipsTool(svc.Object);
         var json = await tool.ExecuteAsync(InputFor("parent"));
 
-        var cascade = JsonDocument.Parse(json).RootElement
-            .GetProperty("relationships")[0].GetProperty("cascadeConfiguration");
-        Assert.Equal("NoCascade", cascade.GetProperty("delete").GetString());
-        Assert.Equal("NoCascade", cascade.GetProperty("assign").GetString());
-        Assert.Equal("NoCascade", cascade.GetProperty("share").GetString());
-        Assert.Equal("NoCascade", cascade.GetProperty("unshare").GetString());
+        var r = JsonDocument.Parse(json).RootElement.GetProperty("relationships")[0];
+        Assert.Equal("NoCascade", r.GetProperty("cascadeDelete").GetString());
     }
 
     // Patch P14 — distinguish missing param from wrong type.
@@ -409,7 +497,7 @@ public class GetRelationshipsToolTests
         string schemaName,
         string referencingEntity,
         string referencedEntity,
-        CascadeConfiguration cascade,
+        CascadeConfiguration? cascade,
         bool isCustom = true)
     {
         var rel = new OneToManyRelationshipMetadata
