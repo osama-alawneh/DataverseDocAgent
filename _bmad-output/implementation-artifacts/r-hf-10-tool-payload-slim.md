@@ -1,6 +1,10 @@
 # R-HF-10: Mode 1 Tool-Payload Slim — `GetTableFieldsTool` + `GetRelationshipsTool`
 
-Status: done
+Status: review
+
+> **Status flip 2026-06-23 (post-correct-course audit):** Status was originally set `done` when code + tests + review patches were all green, but the Epic 2 retrospective process lesson (`deferred-work.md` line 55) requires a real-env E2E (or at minimum `dotnet run` smoke) before any story touching the Mode 1 pipeline transitions to `done`. R-HF-10 modifies two Mode 1 tools — gate applies. Status flipped back to `review` pending the paid E2E against `orgd76c9cf3`. Flips back to `done` on success, or stays `review` with retro reopened on failure.
+
+> **E2E run 2026-06-23 21:47:08 → 21:57:55 — FAILED.** Job `836c6460-1485-40f7-acf5-6dfd2bb51276` against `orgd76c9cf3.crm.dynamics.com` (~200 custom tables). Wall: **631.5s** (vs pre-slim 627.7s — essentially no improvement). iter=2 finished 26.9s w/ 14 parallel `tool_use` results (7 `get_table_fields` + 7 `get_relationships`); iter=3 Claude API call never returned a `tool_use` response — hit `HttpClient.Timeout = 600s` and threw `TaskCanceledException` ("The request was canceled due to the configured HttpClient.Timeout of 600 seconds elapsing"). Outcome: `AI_ERROR (safeToRetry=true)`. **Cost ≈ $0.40** Anthropic. **Verdict:** R-HF-10 slim removed dead-weight fields but did NOT reduce iter=3 context enough to fit inside Claude's per-request response budget on a Large-tier env. **Structural bottleneck confirmed** — Stories 4.3 (ADR-004 batching) + 4.9 (ADR-008 two-pass) are the actual fix per the architectural finding at `deferred-work.md` line 3. R-HF-10 status stays `review`; transition to `done` only after Epic 4 ships and a second paid E2E succeeds, OR after Epic 3 is formally exit-gated against a Typical-tier (≤50 tables) env per PRD §7.1 and R-HF-10 demonstrates value there.
 
 > **Hotfix-as-mini-story.** Authorising artifact: [`../planning-artifacts/sprint-change-proposal-2026-06-23.md`](../planning-artifacts/sprint-change-proposal-2026-06-23.md). This file exists to satisfy BMAD dev-execution audit (Dev Agent Record + Completion Notes + File List) for a tool-output narrow that re-aligns shipped code with the freshly narrowed Story 3.4 AC-2 / AC-3 contract. Not a forward Epic 3 story — corrective hotfix that already cleared the originating story's ACs (now amended).
 
@@ -108,6 +112,7 @@ No new files. No file renames. No DI registration changes. No `appsettings.json`
 |------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 2026-06-23 | R-HF-10 hotfix-as-mini-story created retroactively for BMAD dev-execution audit. Code already implemented per amended Story 3.4 AC-2 + AC-3 via a `general-purpose` subagent. Build + tests green (287/0). Status → done. E2E gate deferred to next step. |
 | 2026-06-23 | Applied 7 `bmad-code-review` patches (LocalizedLabels fallbacks on DisplayName + Description, non-nullable `CascadeDelete`, positive-anchor assertions on negative tests, CascadeType enum-roundtrip Theory + self-N:N Fact, NBSP source-format restoration). Build clean; test suite 287 → 294. 7 findings deferred to `deferred-work.md`; 4 dismissed. |
+| 2026-06-23 | Paid E2E against `orgd76c9cf3` (~200 tables) — **FAILED at 631.5s** with `AI_ERROR (TaskCanceledException, HttpClient.Timeout=600s)`. Same failure mode as pre-slim (627.7s). R-HF-10 slim insufficient on Large-tier; structural bottleneck confirmed. Status stays `review`. Cost ~$0.40. Epic 3 retrospective owed before any further Mode 1 work. Forensic log at `_bmad-output/e2e-runs/r-hf-10-2026-06-23.log`. |
 
 ### Review Findings
 
