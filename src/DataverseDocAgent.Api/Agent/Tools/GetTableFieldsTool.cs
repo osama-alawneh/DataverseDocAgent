@@ -171,11 +171,17 @@ public sealed class GetTableFieldsTool : IDataverseTool
         // defaultValue extractor were all removed — PromptBuilder.cs:52-65 never
         // reads them and the picklist arrays inflated tool_result payloads
         // ~60 chars × ~8 options per column.
-        DisplayName   = attr.DisplayName?.UserLocalizedLabel?.Label,
+        // Coalesce to LocalizedLabels.FirstOrDefault() when UserLocalizedLabel is null —
+        // the SDK populates LocalizedLabels but not UserLocalizedLabel when metadata
+        // was authored via Label(string,int) or under a non-default language. Without
+        // the fallback, non-en-US orgs silently emit null display/description names.
+        DisplayName   = attr.DisplayName?.UserLocalizedLabel?.Label
+                         ?? attr.DisplayName?.LocalizedLabels?.FirstOrDefault()?.Label,
         LogicalName   = attr.LogicalName,
         AttributeType = attr.AttributeType?.ToString(),
         RequiredLevel = attr.RequiredLevel?.Value.ToString(),
-        Description   = attr.Description?.UserLocalizedLabel?.Label,
+        Description   = attr.Description?.UserLocalizedLabel?.Label
+                         ?? attr.Description?.LocalizedLabels?.FirstOrDefault()?.Label,
     };
 
     private record struct TableNameRead(string? TableName, string? Error);

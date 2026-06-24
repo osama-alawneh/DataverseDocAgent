@@ -443,6 +443,65 @@ public class GetRelationshipsToolTests
         Assert.Equal("NoCascade", r.GetProperty("cascadeDelete").GetString());
     }
 
+    // R-HF-10 review patch — CascadeType enum-roundtrip coverage. The slim collapsed
+    // the four-field cascade quad to a single string, so the cascadeDelete value
+    // depends on Enum.ToString() for whichever CascadeType the customizer set.
+    // Previously only NoCascade was exercised (via the null-CascadeConfiguration
+    // fallback). This pins the round-trip for every defined CascadeType so a future
+    // SDK upgrade that flips the enum spelling fails noisily here, not in the
+    // generated docx.
+    [Theory]
+    [InlineData(CascadeType.NoCascade,  "NoCascade")]
+    [InlineData(CascadeType.Cascade,    "Cascade")]
+    [InlineData(CascadeType.Active,     "Active")]
+    [InlineData(CascadeType.UserOwned,  "UserOwned")]
+    [InlineData(CascadeType.RemoveLink, "RemoveLink")]
+    [InlineData(CascadeType.Restrict,   "Restrict")]
+    public async Task ExecuteAsync_OneToMany_CascadeDelete_RoundtripsEveryCascadeType(
+        CascadeType delete, string expected)
+    {
+        var rel = BuildOneToMany("new_a", "child", "parent", BuildCascade(delete: delete));
+        var entity = BuildEntityMetadata("parent", oneToMany: new[] { rel });
+
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+           .Returns(BuildRetrieveEntityResponse(entity));
+
+        var tool = new GetRelationshipsTool(svc.Object);
+        var json = await tool.ExecuteAsync(InputFor("parent"));
+
+        var r = JsonDocument.Parse(json).RootElement.GetProperty("relationships")[0];
+        Assert.Equal(expected, r.GetProperty("cascadeDelete").GetString());
+    }
+
+    // R-HF-10 review patch — self-referencing N:N parity with the existing self-1:N
+    // dedup test at ExecuteAsync_SelfReferencingOneToMany_DeduplicatedBySchemaName.
+    // Comments in GetRelationshipsTool.cs:202 claim "Self-N:N collapses" but no test
+    // pinned that behaviour. If the SDK ever returns the same self-N:N edge in
+    // a second collection, the seen-by-schemaName dedup must still produce one row
+    // and relatedEntity must equal the self table.
+    [Fact]
+    public async Task ExecuteAsync_SelfReferencingManyToMany_DeduplicatedAndCollapses()
+    {
+        var rel = BuildManyToMany("new_self_nn", "self_table", "self_table");
+        var entity = BuildEntityMetadata("self_table",
+            manyToMany: new[] { rel });
+
+        var svc = new Mock<IOrganizationService>();
+        svc.Setup(s => s.Execute(It.IsAny<OrganizationRequest>()))
+           .Returns(BuildRetrieveEntityResponse(entity));
+
+        var tool = new GetRelationshipsTool(svc.Object);
+        var json = await tool.ExecuteAsync(InputFor("self_table"));
+
+        var rels = JsonDocument.Parse(json).RootElement.GetProperty("relationships");
+        Assert.Equal(1, rels.GetArrayLength());
+        var r = rels[0];
+        Assert.Equal("ManyToMany",  r.GetProperty("relationshipType").GetString());
+        Assert.Equal("new_self_nn", r.GetProperty("schemaName").GetString());
+        Assert.Equal("self_table",  r.GetProperty("relatedEntity").GetString());
+    }
+
     // Patch P14 — distinguish missing param from wrong type.
     [Fact]
     public async Task ExecuteAsync_NumericTableName_ReturnsTypeMismatchError()

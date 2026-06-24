@@ -242,7 +242,11 @@ public sealed class GetRelationshipsTool : IDataverseTool
         public string? RelationshipType { get; set; }
         public string? SchemaName       { get; set; }
         public string? RelatedEntity    { get; set; }
-        public string? CascadeDelete    { get; set; }
+        // Non-nullable + default initialiser: per Review Patch P11 (and amended Story
+        // 3.4 AC-3) cascadeDelete must always be a non-null string. Initialiser
+        // guards against a future JsonIgnoreCondition.WhenWritingNull config
+        // accidentally dropping the key, since the type itself forbids null.
+        public string  CascadeDelete    { get; set; } = "NoCascade";
     }
 
     private sealed class ManyToManyDto

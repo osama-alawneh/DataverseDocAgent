@@ -95,6 +95,10 @@ public class GetTableFieldsToolTests
         var json = await tool.ExecuteAsync(InputFor("new_mytable"));
 
         var f = JsonDocument.Parse(json).RootElement.GetProperty("fields")[0];
+        // Positive anchor: confirms BuildField still emits the core key before
+        // asserting absence of options[]; otherwise a hypothetical BuildField
+        // regression that produces an empty field object would pass tautologically.
+        Assert.Equal("new_status", f.GetProperty("logicalName").GetString());
         Assert.False(f.TryGetProperty("options", out _),
             "R-HF-10: picklist attributes must not emit an options array");
     }
@@ -118,6 +122,7 @@ public class GetTableFieldsToolTests
         var json = await tool.ExecuteAsync(InputFor("new_mytable"));
 
         var f = JsonDocument.Parse(json).RootElement.GetProperty("fields")[0];
+        Assert.Equal("new_active", f.GetProperty("logicalName").GetString());
         Assert.False(f.TryGetProperty("options", out _),
             "R-HF-10: boolean attributes must not emit True/False options");
     }
@@ -139,6 +144,7 @@ public class GetTableFieldsToolTests
         var json = await tool.ExecuteAsync(InputFor("new_mytable"));
 
         var f = JsonDocument.Parse(json).RootElement.GetProperty("fields")[0];
+        Assert.Equal("new_active", f.GetProperty("logicalName").GetString());
         Assert.False(f.TryGetProperty("defaultValue", out _),
             "R-HF-10: defaultValue must never appear in the slimmed payload");
     }
@@ -269,7 +275,7 @@ public class GetTableFieldsToolTests
     [Theory]
     [InlineData("Bad_Casing")]
     [InlineData("has space")]
-    [InlineData("name with nbsp")]
+    [InlineData("name\u00A0with\u00A0nbsp")]
     [InlineData("special!chars")]
     public async Task ExecuteAsync_InvalidLogicalName_ReturnsValidationError(string raw)
     {
