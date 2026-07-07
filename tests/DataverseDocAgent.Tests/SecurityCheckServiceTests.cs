@@ -12,9 +12,9 @@ public class SecurityCheckServiceTests
     // ── RequiredPrivileges ────────────��───────────────────────────────────────
 
     [Fact]
-    public void RequiredPrivileges_HasExactly12Entries()
+    public void RequiredPrivileges_HasExactly13Entries()
     {
-        Assert.Equal(12, SecurityCheckService.RequiredPrivileges.Count);
+        Assert.Equal(13, SecurityCheckService.RequiredPrivileges.Count);
     }
 
     [Theory]
@@ -30,6 +30,7 @@ public class SecurityCheckServiceTests
     [InlineData("Read SystemForm")]
     [InlineData("Read Query")]
     [InlineData("Read Organization")]
+    [InlineData("Read SystemUser")]
     public void RequiredPrivileges_ContainsExpectedPrivilege(string expected)
     {
         Assert.Contains(expected, SecurityCheckService.RequiredPrivileges);
@@ -50,6 +51,7 @@ public class SecurityCheckServiceTests
     [InlineData("prvReadSystemForm", "Read SystemForm")]
     [InlineData("prvReadQuery", "Read Query")]
     [InlineData("prvReadOrganization", "Read Organization")]
+    [InlineData("prvReadSystemUser", "Read SystemUser")]
     public void MapPrivilegeName_Read_MapsCorrectly(string input, string expected)
     {
         var result = SecurityCheckService.MapPrivilegeName(input);
@@ -98,7 +100,7 @@ public class SecurityCheckServiceTests
             SecurityCheckService.RequiredPrivileges,
             SecurityCheckService.RequiredPrivileges);
 
-        Assert.Equal(12, passed.Length);
+        Assert.Equal(13, passed.Length);
         Assert.Empty(missing);
         Assert.Empty(extra);
     }
@@ -116,7 +118,7 @@ public class SecurityCheckServiceTests
 
         Assert.Contains("Read PluginAssembly", missing);
         Assert.DoesNotContain("Read PluginAssembly", passed);
-        Assert.Equal(11, passed.Length);
+        Assert.Equal(12, passed.Length);
     }
 
     [Fact]
@@ -149,7 +151,7 @@ public class SecurityCheckServiceTests
             userPrivileges,
             SecurityCheckService.RequiredPrivileges);
 
-        Assert.Equal(12, passed.Length);
+        Assert.Equal(13, passed.Length);
         Assert.Empty(missing);
         Assert.Empty(extra);
     }
@@ -182,7 +184,7 @@ public class SecurityCheckServiceTests
             userPrivileges,
             SecurityCheckService.RequiredPrivileges);
 
-        Assert.Equal(12, passed.Length);
+        Assert.Equal(13, passed.Length);
         Assert.Empty(missing);
         // Verify passed contains original-cased values, not uppercased input
         foreach (var required in SecurityCheckService.RequiredPrivileges)

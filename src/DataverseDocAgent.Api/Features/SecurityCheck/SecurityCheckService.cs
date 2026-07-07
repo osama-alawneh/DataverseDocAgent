@@ -10,7 +10,7 @@ namespace DataverseDocAgent.Api.Features.SecurityCheck;
 
 public sealed class SecurityCheckService
 {
-    // F-029, F-030, F-031 — All 12 required privileges (PRD Section 5.4)
+    // F-029, F-030, F-031 — All 13 required privileges (PRD Section 5.4)
     // All three modes require identical permissions.
     // Read Role covers the roleprivileges intersect table implicitly — Dataverse
     // has no standalone prvReadRolePrivilege.
@@ -28,6 +28,7 @@ public sealed class SecurityCheckService
         "Read SystemForm",
         "Read Query",
         "Read Organization",
+        "Read SystemUser",
     ];
 
     // Privileges that Dataverse auto-grants to every security role when the
@@ -95,9 +96,11 @@ public sealed class SecurityCheckService
             try
             {
                 // Step 2 — Resolve caller's own systemuserid via WhoAmI.
-                // Cannot query the systemuser entity directly — that requires prvReadUser,
-                // which is intentionally NOT in the DataverseDocAgent Reader role (PRD 5.4
-                // lists exactly 12 privileges, Read User is not among them).
+                // WhoAmI needs no table privileges, so this pre-flight step works even
+                // when the role import is incomplete. Querying the systemuser entity
+                // directly would require Read SystemUser — in the role since Story 3.7
+                // (PRD 5.4 lists exactly 13 privileges) — but a missing-privilege check
+                // must not itself depend on the privileges being present.
                 var systemUserId = await GetCallerUserIdAsync(client, linkedCts.Token);
 
                 // Step 3 — Retrieve all privilege names for that user

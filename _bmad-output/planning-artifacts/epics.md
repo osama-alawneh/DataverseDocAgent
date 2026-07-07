@@ -23,6 +23,7 @@ This document provides the complete epic and story breakdown for DataverseDocAge
 
 FR-001: The system SHALL discover and document all custom tables (IsCustomEntity=true) including display name, logical name, solution membership, AI-inferred purpose, and key field summary.
 FR-002: The system SHALL document all custom fields (IsCustomAttribute=true) per table, including data type, required level, default value, option set values/labels, and a plain-English description.
+**Note (R-HF-10, reconciled 2026-07-07 via Epic 3 retrospective):** per the 2026-06-23 sprint change proposal, `default value` and `option set values/labels` are no longer emitted by the Mode 1 tool payloads (`get_table_fields`) and are out of scope for Epic 3 tool contracts — `PromptBuilder.cs:52-65` never consumes them (Phase 2.5 context-bloat fix). Re-introduction, if ever required by a Mode 1 consumer, is Epic 4 design space (dedicated `get_picklist_options(tableName, fieldName)` tool). See `_bmad-output/planning-artifacts/sprint-change-proposal-2026-06-23.md`.
 FR-003: The system SHALL map all custom relationships (IsCustomRelationship=true) including type, both tables, schema name, cascade behaviour, and AI-inferred business meaning.
 FR-004: The system SHALL retrieve compiled plugin assemblies and decompile them in-process using dnlib without writing to disk. Failed decompilations are flagged explicitly.
 FR-005: The system SHALL generate a plain-English explanation of each plugin's logic including what it does, which fields it reads/writes, event/stage, and risk flags.
@@ -578,7 +579,7 @@ So that Claude can call them during Mode 1 generation to gather all required env
 **When** the tool is called
 **Then** a typed exception is thrown that the `AgentOrchestrator` catches and converts to a job failure — credentials are not logged
 
-**Live-Dataverse validation gate (added by Epic 2 retrospective, 2026-04-17):**
+**Live-Dataverse validation gate (added by Epic 2 retrospective, 2026-04-17 — a one-time gate, evaluated once when the story transitions `review` → `done`):**
 **Given** all three tools (`list_custom_tables`, `get_table_fields`, `get_relationships`) have passed unit tests
 **When** the story is a candidate to transition from `review` → `done`
 **Then** each tool MUST be executed at least once against a real, named Dataverse environment (e.g. `orgd76c9cf3` or equivalent sandbox) using the `DataverseDocAgent Reader` security role
@@ -587,6 +588,8 @@ So that Claude can call them during Mode 1 generation to gather all required env
 **And** `get_relationships` MUST return both a 1:N and, where available, an N:N relationship for a known-to-have-both custom table
 **And** the execution evidence (environment name, date, tool call summary, observed discrepancies) is recorded in the story's "Debug Log References" section before the story is marked `done`
 **And** any bug surfaced during live validation (privilege gaps, schema-name mismatches, SDK quirks) MUST be fixed in the same story or explicitly deferred with a named follow-up story ID
+
+**Note (amended 2026-07-07 via Epic 3 retrospective):** this gate binds once, at the moment the story transitions `review` → `done` — it is not a standing invariant re-evaluated on every subsequent change to the tools. It was satisfied for Story 3.4 (live-Dataverse runs against `orgd76c9cf3` cleared 2026-05-14; evidence in the story's Debug Log References). Later forward changes to the tool contracts (e.g. R-HF-10's 2026-06-23 payload slim, which removed `options[]` emission) do not re-open or re-trigger the gate; the ACs above record what was required and validated at transition time, under the then-current contract. The gate's substance is unchanged.
 
 **Driver:** Story 2.3 AC6 near-miss — XML inspection + unit tests declared "validated by design"; live execution surfaced four real bugs (missing `prvReadUser`, phantom `prvReadRolePrivilege`, `prvReadSavedQuery` → `prvReadQuery` rename, SharePoint DMI baseline privileges). Story 3.4 ships three Dataverse tools in one story and cannot repeat that failure mode.
 
