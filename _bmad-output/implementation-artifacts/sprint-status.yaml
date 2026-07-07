@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-13
-last_updated: 2026-07-07 (epic-3-retrospective → done)
+last_updated: 2026-07-07 (Epic 4 sprint planning — retro actions A2/A3 applied; Story 4.12 inserted; Epic 5 backlog added)
 project: DataverseDocAgent
 project_key: NOKEY
 tracking_system: file-system
@@ -70,3 +70,38 @@ development_status:
   3-7-application-user-inventory: done
   3-8-dataverse-connection-factory-consolidation: done
   epic-3-retrospective: done
+  # NOTE: r-hf-10-tool-payload-slim mini-story (not in epics.md) stays 'Status: review'
+  # in its own file until a successful E2E lands — retro team agreement 2026-07-07.
+  # Epic 3 PRD §7.1 exit gate open pending CP-4 (Typical-tier sandbox, Osama) or Epic 4.
+
+  # Epic 4: Mode 1 Full — Environment Intelligence
+  # Stories listed in PLANNED EXECUTION ORDER per planning review 2026-07-07 (retro A3):
+  # 4.1 → 4.2 → 4.12 → 4.3 → 4.4 → 4.5 → 4.6 → 4.7 → 4.8 → 4.9 → 4.10 → 4.11.
+  # Story 4.12 (inserted, retro A3) owns ADR-008 two-pass refactor + AgentOrchestrator
+  # scaling gap. Per retro A2, every story touching Dataverse/Anthropic carries a
+  # "cheapest live probe" AC — probe fixed at story-creation time, result recorded
+  # in story file before review → done (4.2 and 4.8 exempt: pure deterministic).
+  epic-4: backlog
+  4-1-mode-1-output-schema-contract: backlog
+  4-2-deterministicanalyser-service-blast-radius-tier-logic: backlog
+  4-12-two-pass-orchestrator-refactor-and-context-budget: backlog
+  4-3-record-stats-tool-three-tier-batch-strategy: backlog
+  4-4-plugin-dll-retrieval-decompilation-and-blast-radius-pipeline: backlog
+  4-5-javascript-flow-and-workflow-analysis-tools: backlog
+  4-6-business-rules-and-security-roles-documentation-tools: backlog
+  4-7-table-signal-scoring-execution-identity: backlog
+  4-8-mermaid-diagram-generator: backlog
+  4-9-confidence-layer-structured-json-output-enforcement: backlog
+  4-10-two-layer-docxbuilder-restructure: backlog
+  4-11-mode-1-full-pipeline-narrative-recommendations-and-end-to-end-validation: backlog
+  epic-4-retrospective: optional
+
+  # Epic 5: Mode 3 Health Audit Additions
+  # Retro A9: Mode 3 BASE epic (FR-020–028, FR-038) does not exist yet — must be
+  # created before Epic 5 planning. These stories are additions on top of that base.
+  epic-5: backlog
+  5-1-unmanaged-solution-detection: backlog
+  5-2-abandoned-plugin-detection: backlog
+  5-3-zero-record-table-detection: backlog
+  5-4-table-ownership-by-app-users: backlog
+  epic-5-retrospective: optional

@@ -772,6 +772,12 @@ So that the duplicate copies flagged in Epic 2 retro item T3 stop drifting and t
 
 **Exit gate:** Customer confirms output accurately represents ≥90% of environment components reviewed. Document reads like something a senior consultant wrote — specific, referenced, honest about gaps.
 
+**Planning review (2026-07-07 — Epic 3 retro actions A2 + A3):**
+
+- **Story 4.12 inserted** (numbered 4.12 to avoid renumbering existing cross-references; physically placed and executed early). It owns the ADR-008 two-pass orchestrator refactor (`BuildPass1`/`BuildPass2`, architecture.md G3) and the `AgentOrchestrator` scaling gap (per-iteration context budget, tool_result fan-in payload budgeting, streaming go/no-go) — the structural cause behind the Epic 3 R-HF-1…10 cascade. Story 4.9 retains prompt-level confidence enforcement only.
+- **Planned execution order:** 4.1 → 4.2 → 4.12 → 4.3 → 4.4 → 4.5 → 4.6 → 4.7 → 4.8 → 4.9 → 4.10 → 4.11. Story 4.3 and the two-pass work are pulled early per retro discovery 1 (Large-tier single-pass infeasibility, confirmed empirically by R-HF-10).
+- **A2 live-probe gate:** every story touching a live Dataverse or Anthropic surface carries a "cheapest live probe" acceptance criterion — the exact probe is fixed at story-creation time and its observed result must be recorded in the story file before `review → done`. Stories 4.2 and 4.8 are exempt (pure deterministic transformations, no live surface).
+
 ---
 
 ### Story 4.1: Mode 1 Output Schema Contract
@@ -797,6 +803,10 @@ So that every downstream story can rely on a stable, machine-validated contract 
 **Given** the schema is updated in a future story
 **When** the schema file is modified
 **Then** the schema carries a `$schema` version field and the orchestrator references the schema file by path — no hardcoded schema strings in C# code
+
+**Given** this story touches a live Anthropic surface (retro 2026-07-07, action A2)
+**When** the story reaches `review`
+**Then** the "cheapest live probe" defined in the story file at story-creation time has been executed and its observed result recorded in the story file before `review → done` — suggested probe: one minimal live Claude call driven through the orchestrator's schema-validation gate (accept path), plus a deliberately malformed variant replayed locally (reject path)
 
 > **ADR-006 — NFR-017**
 
@@ -834,7 +844,51 @@ So that these deterministic values are never AI-generated and cannot be overridd
 **Then** error handling presence defaults to `Unknown` and the tier is computed conservatively (Sync + Pre-op + Unfiltered + Unknown error handling → `High`, not `Critical`)
 **And** the rationale string notes: "Error handling status could not be determined — decompilation failed"
 
+*A2 note: no live Dataverse/Anthropic surface — pure deterministic transformation over already-collected data; live-probe AC not applicable.*
+
 > **ADR-005, F-049, F-011 — FR-044, FR-011**
+
+---
+
+### Story 4.12: Two-Pass Orchestrator Refactor and Context Budget
+
+*Inserted by Epic 4 planning review (2026-07-07, retro action A3). Numbered 4.12 to preserve existing 4.x cross-references; executes third, after 4.2 and before 4.3.*
+
+As a developer,
+I want `AgentOrchestrator` structurally refactored into the ADR-008 two-pass sequence (`BuildPass1`/`BuildPass2`) with per-iteration context-size instrumentation, a per-call context budget, and tool_result fan-in payload budgeting,
+So that Mode 1 generation stays within the 200k context window and NFR-001 time bounds on Large-tier (~200-table) environments — the structural fix the Epic 3 R-HF-1…10 cascade proved a single-pass loop cannot deliver.
+
+**Acceptance Criteria:**
+
+**Given** `AgentOrchestrator` runs Mode 1 generation
+**When** the pipeline executes
+**Then** generation is split into two targeted Claude passes per ADR-008: Pass 1 (Executive Layer, E1–E5) fed a lean pre-aggregated payload from `DeterministicAnalyser` output, and Pass 2 (Technical Reference, T1–T10) fed full detail
+**And** the orchestrator exposes this as a structural `BuildPass1`/`BuildPass2` sequence (architecture.md gap G3) — a refactor of the single-pass POC loop, not an extension of it
+**And** each pass output is validated against its section subset of `docs/output-schema-mode1.json` (Story 4.1 gate) before any downstream use
+**And** if Pass 1 fails, the job is marked `Failed` and Pass 2 is not attempted (ADR-008 constraint)
+**And** until Story 4.10 lands, document assembly consumes the combined validated pass outputs through the existing `DocxBuilder` without regression of the Epic 3 output
+
+**Given** any Claude call in either pass
+**When** the request is assembled
+**Then** a rough context-size measure (char-count proxy, per retro action A6) is logged before every `GetClaudeMessageAsync` call — per-iteration context size visible in logs
+**And** a configurable per-call context budget (`AnalysisSettings:MaxContextChars`, `appsettings.json`) is enforced: a request that would exceed the budget never reaches the wire — the orchestrator fails the job fast with `code: "CONTEXT_BUDGET_EXCEEDED"`, `safeToRetry: false`, and a log entry naming the pass and iteration — no silent path to an HttpClient timeout
+**And** no credential data appears in any budget or instrumentation log entry (NFR-007)
+
+**Given** a tool iteration fans out multiple parallel `tool_use` requests (R-HF-10 failure pattern: iter=2 fanned out 14 tool_results)
+**When** tool_results are appended to the conversation
+**Then** accumulated tool_result volume per pass is bounded by a configurable budget; an individual oversized tool_result is truncated with an explicit in-payload truncation marker rather than growing the context unbounded
+**And** the fan-in budget composes with the ADR-004 three-tier batching (Story 4.3) rather than duplicating it
+
+**Given** long-running Claude calls remain possible within budget
+**When** timeout mitigation is considered
+**Then** a streaming go/no-go decision is recorded in `deferred-work.md` — evaluated strictly as timeout mitigation, not as a context-ceiling fix (retro Option D rejected for that purpose)
+**And** `HttpClient.Timeout` remains at 10 minutes (R-HF-6, team agreement)
+
+**Given** this story touches live Dataverse and Anthropic surfaces (retro 2026-07-07, action A2)
+**When** the story reaches `review`
+**Then** the "cheapest live probe" defined in the story file at story-creation time has been executed and its observed result recorded in the story file before `review → done` — suggested probe: one instrumented two-pass run against the smallest available live environment, with per-pass, per-iteration context sizes and wall-clock captured in the story file
+
+> **ADR-008, ADR-004 (fan-in composition), architecture.md G3 — FR-013, FR-041–050 (structural carrier), NFR-001, NFR-007; Epic 3 retro 2026-07-07 discoveries 1–3, actions A3 + A6**
 
 ---
 
@@ -865,6 +919,10 @@ So that record recency data is available for table signal scoring without exceed
 **When** the batch processes that table
 **Then** the table is included in the result with `recordCount: null` and `mostRecentDate: null` — it does not fail the overall batch or the job
 **And** a non-credential log entry records the table name and error type
+
+**Given** this story touches a live Dataverse surface (retro 2026-07-07, action A2)
+**When** the story reaches `review`
+**Then** the "cheapest live probe" defined in the story file at story-creation time has been executed and its observed result recorded in the story file before `review → done` — suggested probe: `GetTableRecordStatsTool` run live against the dev environment for one populated and one empty table, plus `BatchRecordStats` tier selection exercised against the live table list (no Claude call required — Dataverse queries only)
 
 > **ADR-004, F-001 — FR-001 (enhanced), NFR-007**
 
@@ -900,6 +958,10 @@ So that every plugin entry in the Mode 1 document contains all required fields f
 **Given** all plugins have been processed
 **When** any plugin step has execution mode Synchronous and the decompiled source has no `try` / `catch` block
 **Then** `error_handling_present` is set to `false` in `EnrichedEnvironmentPayload` — this field feeds the blast radius tier in Story 4.2
+
+**Given** this story touches a live Dataverse surface (retro 2026-07-07, action A2)
+**When** the story reaches `review`
+**Then** the "cheapest live probe" defined in the story file at story-creation time has been executed and its observed result recorded in the story file before `review → done` — suggested probe: retrieve and in-memory decompile one real plugin assembly (with its step registrations and `ModifiedOn`) from the dev environment — Dataverse only, no Claude call
 
 > **F-004, F-005 — FR-004, FR-005, NFR-007, NFR-008**
 
@@ -940,6 +1002,10 @@ So that JavaScript, flow, and workflow sections of the Mode 1 document are popul
 **When** Claude analyses execution identity for that flow
 **Then** the flow is flagged: "At risk of silent failure — connection owner [name] is no longer active" — confidence tag `[VERIFIED]` for the owner lookup, `[INFERRED]` for the risk inference
 
+**Given** this story touches live Dataverse and Anthropic surfaces (retro 2026-07-07, action A2)
+**When** the story reaches `review`
+**Then** the "cheapest live probe" defined in the story file at story-creation time has been executed and its observed result recorded in the story file before `review → done` — suggested probe: retrieve one real JavaScript web resource, one flow, and one classic workflow live from the dev environment, plus one small Claude analysis call on a single retrieved item
+
 > **F-006, F-007, F-008 — FR-006, FR-007, FR-008, FR-048 (partial), NFR-008**
 
 ---
@@ -972,6 +1038,10 @@ So that business rules and security role sections of the Mode 1 document are pop
 **When** the pipeline runs
 **Then** a typed exception is thrown with the specific entity that failed, and the orchestrator marks the job `Failed` with a human-readable error — credential values not logged
 
+**Given** this story touches a live Dataverse surface (retro 2026-07-07, action A2)
+**When** the story reaches `review`
+**Then** the "cheapest live probe" defined in the story file at story-creation time has been executed and its observed result recorded in the story file before `review → done` — suggested probe: retrieve business rules (`Category = 2`) and non-system security roles live from the dev environment — Dataverse only, no Claude call
+
 > **F-009, F-010 — FR-009, FR-010, NFR-008**
 
 ---
@@ -1000,6 +1070,10 @@ So that each table entry in the Mode 1 document has a clear signal summary and e
 **And** every classic workflow entry has an `ownerName` field from the workflow `OwnerId` lookup
 **And** every flow entry has a `connectionOwnerName` field; if that user is inactive, `connectionOwnerInactive: true` is set
 **And** if any identity lookup fails, the field is set to `"[ESTIMATED] — identity lookup unavailable"`
+
+**Given** this story touches a live Dataverse surface (retro 2026-07-07, action A2)
+**When** the story reaches `review`
+**Then** the "cheapest live probe" defined in the story file at story-creation time has been executed and its observed result recorded in the story file before `review → done` — suggested probe: execution identity extraction (`ImpersonatingUserId`, workflow `OwnerId`, flow connection owner + active status) run against live step/owner data from the dev environment — Dataverse only, no Claude call
 
 > **F-048, F-049 (partial) — FR-043, FR-048**
 
@@ -1033,29 +1107,33 @@ So that the Mode 1 document includes an accurate, always-current relationship di
 **When** the diagram is generated
 **Then** the result is an empty diagram with a note: "No custom relationships found — Mermaid diagram not generated"
 
+*A2 note: no live Dataverse/Anthropic surface — deterministic generation from already-collected relationship metadata; live-probe AC not applicable.*
+
 > **F-054 — FR-049**
 
 ---
 
 ### Story 4.9: Confidence Layer — Structured JSON Output Enforcement
 
+*Scope note (planning review 2026-07-07, gap G3): this story owns prompt-level confidence enforcement only. The two-pass orchestration structure (`BuildPass1`/`BuildPass2`), context budgets, and pass sequencing are owned by Story 4.12 — this story's ACs apply per pass, not to a single monolithic invocation.*
+
 As a developer,
-I want the Mode 1 Claude prompt redesigned to require structured JSON output with a mandatory `confidence` field on every AI-generated object, validated against the output schema from Story 4.1,
+I want the Mode 1 Claude prompts redesigned to require structured JSON output with a mandatory `confidence` field on every AI-generated object, validated against the output schema from Story 4.1,
 So that NFR-017 (every AI-generated statement carries exactly one confidence tag) is structurally enforced — not advisory.
 
 **Acceptance Criteria:**
 
-**Given** `AgentOrchestrator` invokes Claude for Mode 1 generation
+**Given** `AgentOrchestrator` invokes Claude for a Mode 1 generation pass (Pass 1 or Pass 2 per ADR-008, structure from Story 4.12)
 **When** the prompt is constructed by `PromptBuilder`
-**Then** the system prompt instructs Claude to return a single JSON object conforming to `output-schema-mode1.json`
+**Then** the system prompt instructs Claude to return a single JSON object conforming to that pass's section subset of `output-schema-mode1.json`
 **And** the prompt explicitly defines the three confidence values and when each applies:
   - `"VERIFIED"` — derived directly from Dataverse metadata or decompiled code analysis
   - `"INFERRED"` — reasoned from naming patterns, structure, record volumes, relationships
   - `"ESTIMATED"` — extrapolation with limited data, or source could not be analysed
 **And** the prompt instructs Claude that every `text`, `description`, `explanation`, and `recommendation` field in the JSON output must have a sibling `confidence` field — no exceptions
 
-**Given** Claude returns a response
-**When** the orchestrator validates it against `output-schema-mode1.json` (from Story 4.1)
+**Given** Claude returns a pass response
+**When** the orchestrator validates it against the pass's section subset of `output-schema-mode1.json` (validation gate from Story 4.1, per-pass wiring from Story 4.12)
 **Then** any response missing a `confidence` field on any required object fails schema validation
 **And** the failure is handled per the validation gate defined in Story 4.1 (`code: "OUTPUT_SCHEMA_VIOLATION"`, `safeToRetry: true`)
 
@@ -1066,6 +1144,10 @@ So that NFR-017 (every AI-generated statement carries exactly one confidence tag
 **Given** an entire section could not be analysed (all plugins failed decompilation)
 **When** Claude generates that section
 **Then** the section's findings carry `[ESTIMATED]` and Claude's output includes an explicit rationale string for why the section is estimated
+
+**Given** this story touches a live Anthropic surface (retro 2026-07-07, action A2)
+**When** the story reaches `review`
+**Then** the "cheapest live probe" defined in the story file at story-creation time has been executed and its observed result recorded in the story file before `review → done` — suggested probe: one live Pass-1-scope Claude call on a minimal payload, response checked for `confidence` fields on every generated object through the schema gate
 
 > **F-050 — FR-045, NFR-017**
 
@@ -1099,6 +1181,7 @@ So that the Mode 1 document serves both senior stakeholders (Executive Layer, re
 **Given** the P2 Mode 1 document produced a single-layer output
 **When** this story is complete
 **Then** the existing test Dataverse environment generates a two-layer document via the unchanged `POST /api/document/generate` endpoint, without requiring a new request body field — the two-layer structure is the default for all Mode 1 generation from this story onward
+**And** (retro 2026-07-07, action A2) this live generation run is this story's "cheapest live probe" — its observed result is recorded in the story file before `review → done`
 
 > **F-051 — FR-046, FR-013 (enhanced)**
 
@@ -1137,6 +1220,7 @@ So that the Phase 3 exit gate is formally met: a document I trust enough to hand
 **Then** the Executive Layer is readable in under 10 minutes without reference to the Technical Reference Layer
 **And** elapsed time from `POST /api/document/generate` receipt to job status `ready` is recorded and documented in `docs/poc-baseline.md` alongside the P1 baseline measurements
 **And** a code review confirms: no credential values in logs, no AI-generated blast radius tiers (all pre-classified by `DeterministicAnalyser`), no AI-generated Mermaid diagram (inserted verbatim), confidence tags present on all AI-generated fields in the JSON output
+**And** (retro 2026-07-07, action A2) the full-pipeline run against the real Dataverse environment is this story's live probe — per-pass context sizes (A6 instrumentation from Story 4.12) and elapsed time are recorded in the story file before `review → done`
 
 > **F-046, F-052, F-012 — FR-041, FR-047, FR-012, NFR-001, NFR-016**
 
