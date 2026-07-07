@@ -418,6 +418,73 @@ public class DocumentGenerateServiceTests
         Assert.Equal(0, store.StoreCallCount);
     }
 
+    [Fact]
+    public async Task ProcessAgentResponse_NullLiteralResponse_ThrowsOutputSchemaViolation()
+    {
+        // Review 4.1 P2 — a bare JSON `null` literal is VALID JSON that the schema
+        // must reject (type != object). Before the patch, JsonNode.Parse("null")
+        // returning a null reference was conflated with a parse failure and the gate
+        // was silently skipped (surfacing later as AI_ERROR). Pin the gate running.
+        var service = BuildServiceWithSpyStore(out var store);
+
+        var ex = await Assert.ThrowsAsync<GenerationFailureException>(
+            () => service.ProcessAgentResponseAsync("null",
+                "https://x.crm.dynamics.com", CancellationToken.None));
+
+        Assert.Equal(JobFailureCodes.OutputSchemaViolation, ex.Code);
+        Assert.True(ex.SafeToRetry);
+        Assert.Equal(0, store.StoreCallCount);
+    }
+
+    [Fact]
+    public async Task ProcessAgentResponse_SchemaViolation_LoggedPathsContainNoInstanceValues()
+    {
+        // Review 4.1 P3 — the exception-message leak test alone is tautological (the
+        // message is a hardcoded constant). This test captures the ACTUAL logged
+        // warning and asserts the failure-path line carries schema keywords/pointers
+        // but never instance VALUES (NFR-007). Positive anchor: the schema-validation
+        // warning must have been logged at all.
+        const string invalid = """
+            { "organisation": { "environmentName": "SENTINEL_VALUE_AAA" },
+              "drift_key": "SENTINEL_VALUE_BBB" }
+            """;
+        var store  = new SpyDocumentStore();
+        var logger = new CapturingLogger<DocumentGenerateService>();
+        var service = new DocumentGenerateService(
+            connectionFactory: null!,
+            orchestratorFactory: () => null!,
+            documentStore: store,
+            schemaValidator: OutputSchemaValidatorTests.SharedValidator,
+            logger: logger);
+
+        var ex = await Assert.ThrowsAsync<GenerationFailureException>(
+            () => service.ProcessAgentResponseAsync(invalid, "https://x.crm.dynamics.com", CancellationToken.None));
+
+        Assert.Equal(JobFailureCodes.OutputSchemaViolation, ex.Code);
+        // Positive anchor — the schema-validation warning was logged.
+        var schemaLog = Assert.Single(
+            logger.Messages.Where(m => m.Contains("failed schema validation")));
+        // NFR-007 — instance VALUES never appear in the logged detail.
+        Assert.DoesNotContain("SENTINEL_VALUE_AAA", schemaLog);
+        Assert.DoesNotContain("SENTINEL_VALUE_BBB", schemaLog);
+    }
+
+    private sealed class CapturingLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+    {
+        public List<string> Messages { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel,
+            Microsoft.Extensions.Logging.EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+            => Messages.Add(formatter(state, exception));
+    }
+
     private sealed class SpyDocumentStore : IDocumentStore
     {
         public int StoreCallCount { get; private set; }

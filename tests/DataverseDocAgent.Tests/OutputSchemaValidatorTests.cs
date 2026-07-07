@@ -317,6 +317,20 @@ public class OutputSchemaValidatorTests
         Assert.DoesNotContain(result.FailurePaths, p => p.Contains(SentinelValue));
     }
 
+    [Fact]
+    public void Validate_NullInstance_FailsWithTypeViolation()
+    {
+        // Review 4.1 P2 — a bare JSON `null` root (JsonNode.Parse("null") returns a
+        // null reference) must be REJECTED by the validator, not treated as
+        // unvalidatable. Pins the contract the pipeline gate's parsedAsJson flag
+        // relies on.
+        var result = NewValidator().Validate(null);
+
+        Assert.False(result.IsValid);
+        Assert.NotEmpty(result.FailurePaths);
+        Assert.Contains(result.FailurePaths, p => p.Contains("type"));
+    }
+
     // ── Group 5: bounded logging ─────────────────────────────────────────────────
 
     [Fact]

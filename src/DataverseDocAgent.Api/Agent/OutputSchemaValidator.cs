@@ -59,6 +59,14 @@ public sealed class OutputSchemaValidator : IOutputSchemaValidator
         // Lazy so a missing/broken schema surfaces on first Mode 1 run (observable,
         // retryable) rather than as a fatal host-startup crash that would also block
         // the security-check endpoint (which has no Mode 1 dependency).
+        // Review 4.1 — ExecutionAndPublication is LOAD-BEARING, do not "fix" to
+        // PublicationOnly: JsonSchema.Net registers the schema's $id into a
+        // process-global static registry, and PublicationOnly's concurrent duplicate
+        // factory executions collide there ("Overwriting registered schemas is not
+        // permitted" — empirically reproduced under the parallel test run during the
+        // Story 4.1 review). Known cost, accepted: a factory exception (missing/corrupt
+        // schema file) is cached for the process lifetime, so those jobs fail AI_ERROR
+        // until redeploy/restart despite safeToRetry:true — tracked in deferred-work.md.
         _schema = new Lazy<JsonSchema>(
             () => JsonSchema.FromFile(schemaPath),
             LazyThreadSafetyMode.ExecutionAndPublication);
@@ -134,7 +142,11 @@ public sealed class OutputSchemaValidator : IOutputSchemaValidator
     }
 
     // instanceLocation/evaluationPath are JSON Pointers into the instance SHAPE and the
-    // schema — they never contain instance VALUES (NFR-007).
+    // schema — they never contain instance VALUES (NFR-007). Review 4.1 P4 precision:
+    // pointers DO contain instance property NAMES (a hallucinated root key on an
+    // additionalProperties failure; the table-logicalName keys of the fields/
+    // relationships maps). Those names are structural — public Dataverse metadata or
+    // model-chosen keys — never credential material, which is what NFR-007 guards.
     private static string FormatLocation(string instanceLocation)
         => string.IsNullOrEmpty(instanceLocation) ? "(root)" : instanceLocation;
 }

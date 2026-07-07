@@ -218,20 +218,27 @@ public sealed class DocumentGenerateService : IGenerationPipeline
         var trimmed = TrimToJsonObject(StripCodeFences(rawResponse));
         if (!string.IsNullOrWhiteSpace(trimmed))
         {
-            JsonNode? instance;
+            // Review 4.1 P2 — track parse success separately from the parsed node:
+            // JsonNode.Parse("null") SUCCEEDS and returns a null reference, so an
+            // `instance is not null` guard alone would silently skip the gate for a
+            // bare JSON `null` literal (valid JSON the schema must reject as
+            // type != object). Only a JsonException means "not JSON" — that case
+            // falls through to ParseAgentJson's AI_ERROR forensic path.
+            JsonNode? instance = null;
+            var parsedAsJson = false;
             try
             {
                 instance = JsonNode.Parse(trimmed);
+                parsedAsJson = true;
             }
             catch (JsonException)
             {
                 // Not parseable JSON — leave the AI_ERROR (JsonException) forensic
                 // path in ParseAgentJson to report it. A parse failure is not a
                 // schema violation.
-                instance = null;
             }
 
-            if (instance is not null)
+            if (parsedAsJson)
             {
                 var validation = _schemaValidator.Validate(instance);
                 if (!validation.IsValid)
