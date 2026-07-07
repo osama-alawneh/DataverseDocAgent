@@ -1,0 +1,256 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dataversedocagent.dev/schemas/output-schema-mode1/1.0.0",
+  "title": "DataverseDocAgent Mode 1 Output Contract",
+  "description": "Formal, versioned contract (ADR-006 / NFR-017 / FR-045) for Claude's Mode 1 final JSON. Story 4.1 v1.0.0 is TRANSITIONAL: the six Epic-3 keys shipped today (organisation, tables, fields, relationships, applicationUsers, keyObservations) are REQUIRED so the gate validates real output from this story onward; the fourteen Mode 1 Full target sections are defined-but-OPTIONAL so downstream stories (4.2-4.12) have a stable contract to code against. Stories 4.9/4.11 flip target sections to required and retire the transitional keys via a schema version bump (that is what the version field exists for). Object field names are camelCase (architecture.md:663); section keys are snake_case (epic ACs); confidence values are uppercase bare strings (architecture.md:657 — the bracketed [VERIFIED] form is docx-render only, never JSON).",
+  "version": "1.0.0",
+  "$comment": "One $defs entry per section so Story 4.12 can compose per-pass subset schemas by $ref without touching v1.0.0 definitions. Downstream stories (4.4-4.9) refine the placeholder target-section item shapes (currently the generic `finding`) via a schema version bump.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "organisation",
+    "tables",
+    "fields",
+    "relationships",
+    "applicationUsers",
+    "keyObservations"
+  ],
+  "properties": {
+    "organisation": { "$ref": "#/$defs/organisation" },
+    "tables": { "$ref": "#/$defs/tablesSection" },
+    "fields": { "$ref": "#/$defs/fieldsSection" },
+    "relationships": { "$ref": "#/$defs/relationshipsSection" },
+    "applicationUsers": { "$ref": "#/$defs/applicationUsersSection" },
+    "keyObservations": { "$ref": "#/$defs/keyObservationsSection" },
+
+    "executive_summary": { "$ref": "#/$defs/executiveSummary" },
+    "publisher_prefix_summary": { "$ref": "#/$defs/publisherPrefixSummary" },
+    "plugins": { "$ref": "#/$defs/pluginsSection" },
+    "flows": { "$ref": "#/$defs/flowsSection" },
+    "workflows": { "$ref": "#/$defs/workflowsSection" },
+    "javascript": { "$ref": "#/$defs/javascriptSection" },
+    "business_rules": { "$ref": "#/$defs/businessRulesSection" },
+    "security_roles": { "$ref": "#/$defs/securityRolesSection" },
+    "app_users": { "$ref": "#/$defs/appUsersSection" },
+    "recommendations": { "$ref": "#/$defs/recommendationsSection" },
+    "top_risks": { "$ref": "#/$defs/topRisksSection" }
+  },
+
+  "$defs": {
+    "confidenceLevel": {
+      "$comment": "ADR-006 / NFR-017 confidence taxonomy. Uppercase bare strings only; the bracketed docx form is added at render time and must never appear in JSON.",
+      "type": "string",
+      "enum": ["VERIFIED", "INFERRED", "ESTIMATED"]
+    },
+
+    "organisation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environmentName"],
+      "properties": {
+        "environmentName": { "type": "string" },
+        "environmentUrl": { "type": ["string", "null"] },
+        "version": { "type": ["string", "null"] },
+        "baseLanguageName": { "type": ["string", "null"] }
+      }
+    },
+
+    "tablesSection": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/tableItem" }
+    },
+    "tableItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logicalName"],
+      "properties": {
+        "logicalName": { "type": "string" },
+        "displayName": { "type": ["string", "null"] },
+        "schemaName": { "type": ["string", "null"] },
+        "solutionName": { "type": ["string", "null"] },
+        "description": { "type": ["string", "null"] },
+        "purpose": { "type": ["string", "null"] }
+      }
+    },
+
+    "fieldsSection": {
+      "$comment": "Transitional map keyed by table logicalName -> array of fields (matches shipped PromptBuilder contract). The AC-2 fields[] array form is a future-target shape introduced by a later version bump.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/fieldItem" }
+      }
+    },
+    "fieldItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logicalName"],
+      "properties": {
+        "logicalName": { "type": "string" },
+        "displayName": { "type": ["string", "null"] },
+        "attributeType": { "type": ["string", "null"] },
+        "requiredLevel": { "type": ["string", "null"] },
+        "description": { "type": ["string", "null"] }
+      }
+    },
+
+    "relationshipsSection": {
+      "$comment": "Transitional map keyed by table logicalName -> array of relationships (matches shipped PromptBuilder contract, post-R-HF-10 slim shape).",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/relationshipItem" }
+      }
+    },
+    "relationshipItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaName": { "type": ["string", "null"] },
+        "relationshipType": { "type": ["string", "null"] },
+        "relatedEntity": { "type": ["string", "null"] },
+        "cascadeDelete": { "type": ["string", "null"] },
+        "businessMeaning": { "type": ["string", "null"] }
+      }
+    },
+
+    "applicationUsersSection": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/applicationUserItem" }
+    },
+    "applicationUserItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "displayName": { "type": ["string", "null"] },
+        "applicationId": { "type": ["string", "null"] },
+        "email": { "type": ["string", "null"] },
+        "roles": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "keyObservationsSection": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+
+    "finding": {
+      "$comment": "Generic AI finding/explanation object (ADR-006 shape). Placeholder item type shared by the target finding-array sections at v1.0.0; downstream stories specialise per-section shapes via a version bump. `confidence` is mandatory (AC-3 / NFR-017).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "confidence"],
+      "properties": {
+        "entityName": { "type": ["string", "null"] },
+        "text": { "type": "string" },
+        "confidence": { "$ref": "#/$defs/confidenceLevel" }
+      }
+    },
+
+    "recommendation": {
+      "$comment": "ADR-006 / FR-012 severity-tiered recommendation. v1.0.0 pins the full Critical/High 5-part shape; tiered 3-part (Medium) and 1-sentence (Low/Advisory) variants arrive with the Story 4.11 version bump.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "severity",
+        "category",
+        "entityName",
+        "what",
+        "whyProblem",
+        "consequence",
+        "howToFix",
+        "estimatedEffort",
+        "confidence"
+      ],
+      "properties": {
+        "severity": { "type": "string" },
+        "category": { "type": "string" },
+        "entityName": { "type": "string" },
+        "what": { "type": "string" },
+        "whyProblem": { "type": "string" },
+        "consequence": { "type": "string" },
+        "howToFix": { "type": "string" },
+        "estimatedEffort": { "type": "string" },
+        "confidence": { "$ref": "#/$defs/confidenceLevel" }
+      }
+    },
+
+    "topRisk": {
+      "$comment": "FR-047 Top 5 Risks item using the FR-012 5-part format (camelCase per architecture.md:663, overriding the snake_case spelling in epics.md:1207). The zero-risk sentinel {severity:'none', text:...} is a Story 4.11 rendering concern deferred to the version that flips top_risks to required.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "severity",
+        "what",
+        "whyProblem",
+        "consequence",
+        "howToFix",
+        "estimatedEffort",
+        "confidence"
+      ],
+      "properties": {
+        "severity": { "type": "string" },
+        "what": { "type": "string" },
+        "whyProblem": { "type": "string" },
+        "consequence": { "type": "string" },
+        "howToFix": { "type": "string" },
+        "estimatedEffort": { "type": "string" },
+        "confidence": { "$ref": "#/$defs/confidenceLevel" }
+      }
+    },
+
+    "executiveSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["narrative", "confidence"],
+      "properties": {
+        "narrative": { "type": "string" },
+        "confidence": { "$ref": "#/$defs/confidenceLevel" }
+      }
+    },
+
+    "publisherPrefixSummary": {
+      "$comment": "Deterministic (PrefixAnalyzer) host-computed summary, not an AI finding — no confidence tag. Loose shape at v1.0.0; the deterministic producer story pins fields via a version bump.",
+      "type": "object"
+    },
+
+    "pluginsSection": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "flowsSection": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "workflowsSection": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "javascriptSection": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "businessRulesSection": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "securityRolesSection": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "appUsersSection": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "recommendationsSection": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/recommendation" }
+    },
+    "topRisksSection": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/topRisk" }
+    }
+  }
+}

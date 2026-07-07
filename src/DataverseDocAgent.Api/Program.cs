@@ -79,6 +79,10 @@ builder.Services.AddSingleton<IJobStore, InMemoryJobStore>();
 // not captured at module-load time. Prevents a stale, Complete()'d channel surviving
 // across WebApplicationFactory instances in tests.
 builder.Services.AddSingleton(_ => Channel.CreateUnbounded<GenerationTask>());
+// Story 4.1 — ADR-006 Mode 1 output schema gate. Singleton so the draft-2020-12
+// schema is parsed once (lazily) and reused across all generation jobs. Consumed
+// by the Singleton DocumentGenerateService below.
+builder.Services.AddSingleton<IOutputSchemaValidator, OutputSchemaValidator>();
 // Story 3.5 — DocumentGenerateService is the real pipeline; replaces StubGenerationPipeline.
 builder.Services.AddSingleton<IGenerationPipeline, DocumentGenerateService>();
 builder.Services.AddHostedService<GenerationBackgroundService>();

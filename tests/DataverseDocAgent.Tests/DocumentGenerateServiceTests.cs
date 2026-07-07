@@ -1,9 +1,13 @@
 // F-001, F-013, NFR-014 — Story 3.5 DocumentGenerateService pipeline tests
 // F-047 — Story 3.6 PrefixSummary enrichment integration test
 using System.Text.Json;
+using DataverseDocAgent.Api.Agent;
 using DataverseDocAgent.Api.Documents;
 using DataverseDocAgent.Api.Features.DocumentGenerate;
 using DataverseDocAgent.Api.Jobs;
+using DataverseDocAgent.Api.Storage;
+using DataverseDocAgent.Shared.Dataverse;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DataverseDocAgent.Tests;
 
@@ -310,5 +314,120 @@ public class DocumentGenerateServiceTests
 
         Assert.Single(filtered);
         Assert.Equal("vel", summary.PrimaryClientPrefix);
+    }
+
+    // ── Story 4.1 — schema gate wired into the pipeline (AC-4, AC-5, AC-6) ────────
+
+    // Golden Epic-3-shape response that satisfies the transitional contract; used to
+    // prove the gate lets valid output through to DocxBuilder + the document store.
+    private const string ValidEpic3Response = """
+        {
+          "organisation": { "environmentName": "Contoso", "environmentUrl": null,
+            "version": "9.2", "baseLanguageName": "English" },
+          "tables": [ { "logicalName": "vel_account" } ],
+          "fields": {},
+          "relationships": {},
+          "applicationUsers": [],
+          "keyObservations": ["one", "two", "three"]
+        }
+        """;
+
+    private static DocumentGenerateService BuildServiceWithSpyStore(out SpyDocumentStore store)
+    {
+        store = new SpyDocumentStore();
+        return new DocumentGenerateService(
+            connectionFactory: null!,          // unused by ProcessAgentResponseAsync
+            orchestratorFactory: () => null!,  // unused by ProcessAgentResponseAsync
+            documentStore: store,
+            // Shared singleton — JsonSchema.Net forbids re-registering the same $id from a
+            // second instance (production uses a DI singleton; see OutputSchemaValidatorTests).
+            schemaValidator: OutputSchemaValidatorTests.SharedValidator,
+            logger: NullLogger<DocumentGenerateService>.Instance);
+    }
+
+    [Fact]
+    public async Task ProcessAgentResponse_SchemaInvalidJson_ThrowsOutputSchemaViolation_AndStoreNeverCalled()
+    {
+        // Valid JSON, but missing required transitional keys → schema violation.
+        const string invalid = """{ "organisation": { "environmentName": "x" } }""";
+        var service = BuildServiceWithSpyStore(out var store);
+
+        var ex = await Assert.ThrowsAsync<GenerationFailureException>(
+            () => service.ProcessAgentResponseAsync(invalid, "https://x.crm.dynamics.com", CancellationToken.None));
+
+        Assert.Equal(JobFailureCodes.OutputSchemaViolation, ex.Code);
+        Assert.Equal("OUTPUT_SCHEMA_VIOLATION", ex.Code);
+        Assert.True(ex.SafeToRetry);
+        // AC-6 proxy — DocxBuilder.Build is static; the document store is the observable
+        // downstream boundary. A schema violation must reach neither.
+        Assert.Equal(0, store.StoreCallCount);
+    }
+
+    [Fact]
+    public async Task ProcessAgentResponse_SchemaInvalidJson_DoesNotLeakInstanceValuesToClientMessage()
+    {
+        // NFR-007 — the fixed exception message must not echo the offending output.
+        const string invalid = """{ "organisation": { "environmentName": "SECRET_ENV_NAME" }, "leak_key": "SECRET_LEAK" }""";
+        var service = BuildServiceWithSpyStore(out _);
+
+        var ex = await Assert.ThrowsAsync<GenerationFailureException>(
+            () => service.ProcessAgentResponseAsync(invalid, "https://x.crm.dynamics.com", CancellationToken.None));
+
+        Assert.Equal(JobFailureCodes.OutputSchemaViolation, ex.Code);
+        Assert.DoesNotContain("SECRET_ENV_NAME", ex.Message);
+        Assert.DoesNotContain("SECRET_LEAK", ex.Message);
+    }
+
+    [Fact]
+    public async Task ProcessAgentResponse_ValidEpic3Response_PassesGate_AndStoresDocument()
+    {
+        var service = BuildServiceWithSpyStore(out var store);
+
+        var token = await service.ProcessAgentResponseAsync(
+            ValidEpic3Response, "https://x.crm.dynamics.com", CancellationToken.None);
+
+        Assert.Equal("spy-token", token);
+        Assert.Equal(1, store.StoreCallCount);
+    }
+
+    [Fact]
+    public async Task ProcessAgentResponse_NonJsonResponse_StillRaisesAiError_GateIsDefenceInDepth()
+    {
+        // Dev Notes — the gate skips non-JSON input the trim helpers cannot rescue; the
+        // existing ParseAgentJson JsonException fallback (AI_ERROR) must still fire.
+        var service = BuildServiceWithSpyStore(out var store);
+
+        var ex = await Assert.ThrowsAsync<GenerationFailureException>(
+            () => service.ProcessAgentResponseAsync("Claude returned only prose, no JSON.",
+                "https://x.crm.dynamics.com", CancellationToken.None));
+
+        Assert.Equal(JobFailureCodes.AiError, ex.Code);
+        Assert.Equal(0, store.StoreCallCount);
+    }
+
+    [Fact]
+    public async Task ProcessAgentResponse_MaxIterationsSentinel_RaisesAiError_BeforeGate()
+    {
+        var service = BuildServiceWithSpyStore(out var store);
+
+        var ex = await Assert.ThrowsAsync<GenerationFailureException>(
+            () => service.ProcessAgentResponseAsync(AgentOrchestrator.MaxIterationsSentinel,
+                "https://x.crm.dynamics.com", CancellationToken.None));
+
+        Assert.Equal(JobFailureCodes.AiError, ex.Code);
+        Assert.Equal(0, store.StoreCallCount);
+    }
+
+    private sealed class SpyDocumentStore : IDocumentStore
+    {
+        public int StoreCallCount { get; private set; }
+
+        public Task<string> StoreAsync(byte[] documentBytes, TimeSpan ttl)
+        {
+            StoreCallCount++;
+            return Task.FromResult("spy-token");
+        }
+
+        public Task<byte[]?> RetrieveAsync(string token) => Task.FromResult<byte[]?>(null);
     }
 }

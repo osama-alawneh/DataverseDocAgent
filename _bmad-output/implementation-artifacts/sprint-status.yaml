@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-13
-last_updated: 2026-07-07 (story 4-1 created → ready-for-dev; epic-4 → in-progress)
+last_updated: 2026-07-07 (story 4-1 → review; output-schema-contract implemented, 316 tests green, live probe passed)
 project: DataverseDocAgent
 project_key: NOKEY
 tracking_system: file-system
@@ -82,7 +82,7 @@ development_status:
   # "cheapest live probe" AC — probe fixed at story-creation time, result recorded
   # in story file before review → done (4.2 and 4.8 exempt: pure deterministic).
   epic-4: in-progress
-  4-1-mode-1-output-schema-contract: ready-for-dev
+  4-1-mode-1-output-schema-contract: review
   4-2-deterministicanalyser-service-blast-radius-tier-logic: backlog
   4-12-two-pass-orchestrator-refactor-and-context-budget: backlog
   4-3-record-stats-tool-three-tier-batch-strategy: backlog

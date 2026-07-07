@@ -1,6 +1,6 @@
 # Story 4.1: Mode 1 Output Schema Contract
 
-Status: ready-for-dev
+Status: review
 
 > **Gate story.** First Epic 4 story (execution order 4.1 → 4.2 → 4.12 → 4.3 → …, per planning review 2026-07-07). `docs/output-schema-mode1.json` is the ADR-006 prerequisite deliverable that every downstream Mode 1 output story (4.2–4.12) depends on. Architecture gap G1 closes here.
 
@@ -26,26 +26,26 @@ So that every downstream story can rely on a stable, machine-validated contract 
 
 ## Tasks / Subtasks
 
-- [ ] **Author `docs/output-schema-mode1.json`** (AC: 1, 2, 3, 7)
-  - [ ] JSON Schema **draft 2020-12** (`"$schema": "https://json-schema.org/draft/2020-12/schema"`), `$id` carrying a semver (e.g. `.../output-schema-mode1/1.0.0`), plus a top-level `"version": "1.0.0"` annotation property
-  - [ ] Root object with **two key groups** (see Dev Notes — Transitional Contract Strategy):
+- [x] **Author `docs/output-schema-mode1.json`** (AC: 1, 2, 3, 7)
+  - [x] JSON Schema **draft 2020-12** (`"$schema": "https://json-schema.org/draft/2020-12/schema"`), `$id` carrying a semver (e.g. `.../output-schema-mode1/1.0.0`), plus a top-level `"version": "1.0.0"` annotation property
+  - [x] Root object with **two key groups** (see Dev Notes — Transitional Contract Strategy):
     - **Transitional Epic 3 keys (required at v1.0.0):** `organisation`, `tables`, `fields`, `relationships`, `applicationUsers`, `keyObservations` — shapes copied exactly from the shipped contract in `PromptBuilder.cs:40-73` (post-R-HF-10 slim shapes: field = `{logicalName, displayName, attributeType, requiredLevel, description}`; relationship = `{schemaName, relationshipType, relatedEntity, cascadeDelete, businessMeaning}`)
     - **Target Mode 1 Full sections (optional at v1.0.0):** the 14 sections from AC-2, each fully defined in `$defs` with mandatory `confidence` on every finding/explanation/recommendation object; `recommendations[]` items carry the ADR-006 severity-tiered shape (`severity`, `category`, `entityName`, `what`, `whyProblem`, `consequence`, `howToFix`, `estimatedEffort`, `confidence`); `top_risks[]` items the FR-012 5-part shape
-  - [ ] Root `"additionalProperties": false` — unknown keys are prompt drift and must fail loudly
-  - [ ] One `$defs` entry per section so Story 4.12 can compose per-pass subsets by `$ref`
-  - [ ] Section keys snake_case exactly as listed in AC-2; **field names inside objects camelCase** (architecture.md:663 convention — see Dev Notes)
-- [ ] **Add `JsonSchema.Net` 9.2.2 to `DataverseDocAgent.Api.csproj`** (AC: 4)
-- [ ] **Implement `OutputSchemaValidator`** (AC: 4, 5, 7)
-  - [ ] New file `src/DataverseDocAgent.Api/Agent/OutputSchemaValidator.cs`: interface `IOutputSchemaValidator` + sealed implementation, registered as DI **singleton** in `Program.cs`
-  - [ ] Loads the schema **once** (lazy) from a file path resolved against `AppContext.BaseDirectory`; schema file delivered to output via a `<Content Include="..\..\docs\output-schema-mode1.json" Link="docs\output-schema-mode1.json" CopyToOutputDirectory="PreserveNewest" />` item in `DataverseDocAgent.Api.csproj` — no schema string in C#
-  - [ ] `Validate(JsonNode instance)` returns pass/fail + bounded failure detail: at most 10 `(instanceLocation, evaluationPath/keyword)` pairs from `EvaluationResults` (use `OutputFormat.List`); **never** include instance values in the detail (NFR-007 discipline)
-- [ ] **Wire the gate into `DocumentGenerateService.RunPipelineAsync`** (AC: 4, 5, 6)
-  - [ ] Order: `rawResponse` → existing `StripCodeFences` + `TrimToJsonObject` → parse to `JsonNode` → **`OutputSchemaValidator.Validate`** → only then deserialize `AgentJsonModel` and proceed to `DocxBuilder.Build`
-  - [ ] On failure: throw `GenerationFailureException(JobFailureCodes.OutputSchemaViolation, safeToRetry: true, "Claude output failed Mode 1 schema validation.")` and log the bounded failure paths via `_logger.LogWarning` (pattern-match the existing R-HF-4 bounded-forensics style; reuse `TruncateForLog` only if a raw snippet is genuinely needed — prefer paths-only)
-  - [ ] Add `public const string OutputSchemaViolation = "OUTPUT_SCHEMA_VIOLATION";` to `JobFailureCodes` (public API contract — document in the XML doc like the existing codes)
-- [ ] **Tests** (AC: 5, 6, 9 — see Testing Requirements)
-- [ ] **Live probe + record results** (AC: 8)
-- [ ] **Build + test gate:** `dotnet build -nologo -v q` zero warnings/errors; `dotnet test tests/DataverseDocAgent.Tests --no-build --nologo -v q` all green
+  - [x] Root `"additionalProperties": false` — unknown keys are prompt drift and must fail loudly
+  - [x] One `$defs` entry per section so Story 4.12 can compose per-pass subsets by `$ref`
+  - [x] Section keys snake_case exactly as listed in AC-2; **field names inside objects camelCase** (architecture.md:663 convention — see Dev Notes)
+- [x] **Add `JsonSchema.Net` 9.2.2 to `DataverseDocAgent.Api.csproj`** (AC: 4)
+- [x] **Implement `OutputSchemaValidator`** (AC: 4, 5, 7)
+  - [x] New file `src/DataverseDocAgent.Api/Agent/OutputSchemaValidator.cs`: interface `IOutputSchemaValidator` + sealed implementation, registered as DI **singleton** in `Program.cs`
+  - [x] Loads the schema **once** (lazy) from a file path resolved against `AppContext.BaseDirectory`; schema file delivered to output via a `<Content Include="..\..\docs\output-schema-mode1.json" Link="docs\output-schema-mode1.json" CopyToOutputDirectory="PreserveNewest" />` item in `DataverseDocAgent.Api.csproj` — no schema string in C#
+  - [x] `Validate(JsonNode instance)` returns pass/fail + bounded failure detail: at most 10 `(instanceLocation, evaluationPath/keyword)` pairs from `EvaluationResults` (use `OutputFormat.List`); **never** include instance values in the detail (NFR-007 discipline)
+- [x] **Wire the gate into `DocumentGenerateService.RunPipelineAsync`** (AC: 4, 5, 6)
+  - [x] Order: `rawResponse` → existing `StripCodeFences` + `TrimToJsonObject` → parse to `JsonNode` → **`OutputSchemaValidator.Validate`** → only then deserialize `AgentJsonModel` and proceed to `DocxBuilder.Build`
+  - [x] On failure: throw `GenerationFailureException(JobFailureCodes.OutputSchemaViolation, safeToRetry: true, "Claude output failed Mode 1 schema validation.")` and log the bounded failure paths via `_logger.LogWarning` (pattern-match the existing R-HF-4 bounded-forensics style; reuse `TruncateForLog` only if a raw snippet is genuinely needed — prefer paths-only)
+  - [x] Add `public const string OutputSchemaViolation = "OUTPUT_SCHEMA_VIOLATION";` to `JobFailureCodes` (public API contract — document in the XML doc like the existing codes)
+- [x] **Tests** (AC: 5, 6, 9 — see Testing Requirements)
+- [x] **Live probe + record results** (AC: 8)
+- [x] **Build + test gate:** `dotnet build -nologo -v q` zero warnings/errors; `dotnet test tests/DataverseDocAgent.Tests --no-build --nologo -v q` all green
 
 ## Dev Notes
 
@@ -125,15 +125,57 @@ Test project: `tests/DataverseDocAgent.Tests` (xUnit; 296 green at story start).
 
 ### Agent Model Used
 
-(story creation: claude-fable-5 via bmad-create-story, 2026-07-07)
+- Story creation: claude-fable-5 via bmad-create-story, 2026-07-07
+- Implementation (bmad-dev-story): claude-opus-4-8, 2026-07-07
 
 ### Debug Log References
 
-### Live Probe Results (AC-8 — fill before review → done)
+Verification gates (2026-07-07, branch MultiAgent-Run):
 
-- Reject path (local replay):
-- Accept path (live Anthropic call):
+- Baseline (pre-change): `dotnet build DataverseDocAgent.sln -nologo -v q` → **0 Warning(s), 0 Error(s)**; `dotnet test tests/DataverseDocAgent.Tests` → **Passed: 296, Failed: 0, Total: 296**.
+- Final `dotnet build DataverseDocAgent.sln -nologo -v q` → **Build succeeded. 0 Warning(s), 0 Error(s)**.
+- Final `dotnet test tests/DataverseDocAgent.Tests --no-build --nologo -v q` → **Passed: 316, Failed: 0, Skipped: 0, Total: 316** (296 baseline + 20 new).
+
+Issues encountered and resolved during dev:
+
+1. **`JsonSchema.Net` 9.2.2 API surface differs from the story's sketch.** `JsonSchema.Evaluate` takes a `System.Text.Json.JsonElement`, not a `JsonNode`; there is no `EvaluationResults.HasErrors`. Kept the story-mandated `Validate(JsonNode instance)` public signature and convert internally (`JsonSerializer.SerializeToElement`); use `EvaluationResults.Errors` (a keyword→message dictionary) for the error-bearing check.
+2. **Schema build error `DefsKeyword: Values must be valid schemas`.** A `"$comment"` string placed as a direct child of `$defs` is treated by the validator as a subschema. Moved that annotation to a root-level `$comment` (inner `$comment` keywords inside individual `$defs` objects are valid and were kept).
+3. **`SchemaRegistry: Overwriting registered schemas is not permitted` under the parallel test run.** `JsonSchema.Net` auto-registers a schema's `$id` into a process-global static registry on first evaluation. Multiple validator instances (one per test) across parallel xUnit classes collided. Production is unaffected (DI singleton = one registration); tests now share a single validator instance to mirror that.
+4. **Failure-path extraction initially returned only `(root) :: ` for `required`/`enum`/`additionalProperties` failures.** With `OutputFormat.List` the failing keyword attaches to the node's `Errors` dictionary (and, for `required`, to the root node), not to the flattened `EvaluationPath` text. Rewrote extraction to walk the root plus every detail and emit one entry per failing keyword using the `Errors` **key** only — never the message value (NFR-007).
+
+### Live Probe Results (AC-8)
+
+- **Reject path (local replay) — DONE (unit-covered, free).** Covered by unit tests rather than a manual replay: `OutputSchemaValidatorTests.Validate_MissingRequiredTransitionalKey_Fails` (missing required transitional key) and `.Validate_TargetSectionObjectMissingConfidence_Fails` (a `recommendations[]` object missing `confidence`) both return `IsValid == false` with path-only detail; and the pipeline-level `DocumentGenerateServiceTests.ProcessAgentResponse_SchemaInvalidJson_ThrowsOutputSchemaViolation_AndStoreNeverCalled` proves the malformed variant surfaces as `GenerationFailureException` with `Code == "OUTPUT_SCHEMA_VIOLATION"`, `SafeToRetry == true`, and the document store receiving zero calls (AC-6 proxy).
+- **Accept path (live Anthropic call) — DONE, PASS.** One live call to `AgentOrchestrator.RunAsync` (model `Claude46Sonnet`, no Dataverse tools) via a throwaway probe harness (removed after run; not committed), with the API key sourced from the existing `Anthropic:ApiKey` user-secret. Prompt requested a tiny JSON object conforming to the transitional required keys. Claude returned:
+  `{"organisation":{"environmentName":"Default"},"tables":[],"fields":{},"relationships":{},"applicationUsers":[],"keyObservations":["No tables were provided in the input","No fields or relationships could be derived","No application users were identified in the dataset"]}`
+  Fed through `OutputSchemaValidator.Validate` → **PASS** (`IsValid == true`). Approximate cost: a single small Sonnet completion (~270-char output), well within the $0.01–0.05 estimate.
 
 ### Completion Notes List
 
+- Authored `docs/output-schema-mode1.json` (JSON Schema draft 2020-12, `$id .../output-schema-mode1/1.0.0`, `version: "1.0.0"`). Transitional strategy implemented exactly: the six Epic-3 keys are **required** (root `required`), the eleven new AC-2 target sections plus the transitional dual-purpose `tables`/`fields`/`relationships` are all defined as root properties; root `additionalProperties: false`. Every section has its own `$defs` entry (per-pass composition hook for Story 4.12). `confidence` is a single canonical `$defs/confidenceLevel` enum (`VERIFIED`/`INFERRED`/`ESTIMATED`) referenced by every finding/recommendation object, each of which lists `confidence` in `required` (AC-3 pinned structurally by a schema-walk test).
+- Naming split honoured: section keys snake_case (`executive_summary`, `top_risks`, …), object field names camelCase (`whyProblem`, `howToFix`, `estimatedEffort`, …). Note: `top_risks[]` item fields use camelCase per architecture.md:663 / the story Dev Notes, intentionally overriding the snake_case spelling in epics.md:1207 (recorded as a deviation below).
+- `OutputSchemaValidator` (`IOutputSchemaValidator` + sealed impl) loads the schema once (lazy, thread-safe) from `AppContext.BaseDirectory/docs/output-schema-mode1.json`, delivered there by a csproj `Content` item — no schema string in C#. Registered as a DI **singleton** in `Program.cs`. Failure detail is bounded to ≤10 entries, keyword+path only, never instance values.
+- Gate wired in `DocumentGenerateService`: the response→docx→store flow was extracted into an internal `ProcessAgentResponseAsync` (testable without a live `ServiceClient`); the gate runs after the existing `StripCodeFences`/`TrimToJsonObject` trim and before typed deserialisation. Non-JSON input the trim helpers cannot rescue falls through to the existing `ParseAgentJson` `JsonException` → `AI_ERROR` path (defence-in-depth, preserved). New `JobFailureCodes.OutputSchemaViolation = "OUTPUT_SCHEMA_VIOLATION"`, `safeToRetry: true`.
+- Not touched (per scope guard): `AgentOrchestrator.cs`, `PromptBuilder.cs`, `DocxBuilder.cs`, any tool, HttpClient config, iteration caps.
+- 20 new tests across the 5 required groups (schema document structure, validator accept, validator reject, pipeline gate, bounded logging), negative-assertion style with positive anchors. Suite: 296 → 316 green.
+
 ### File List
+
+**Added**
+- `docs/output-schema-mode1.json`
+- `src/DataverseDocAgent.Api/Agent/OutputSchemaValidator.cs`
+- `tests/DataverseDocAgent.Tests/OutputSchemaValidatorTests.cs`
+
+**Modified**
+- `src/DataverseDocAgent.Api/DataverseDocAgent.Api.csproj` (JsonSchema.Net 9.2.2 package + schema Content item)
+- `src/DataverseDocAgent.Api/Program.cs` (DI singleton registration for `IOutputSchemaValidator`)
+- `src/DataverseDocAgent.Api/Features/DocumentGenerate/DocumentGenerateService.cs` (validator injection + `ProcessAgentResponseAsync` extraction with the schema gate)
+- `src/DataverseDocAgent.Api/Jobs/JobFailureCodes.cs` (new `OutputSchemaViolation` constant)
+- `tests/DataverseDocAgent.Tests/DocumentGenerateServiceTests.cs` (pipeline-gate tests + spy document store)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` (status → review)
+
+### Deviations from the story spec
+
+1. **`JsonSchema.Net` 9.2.2 evaluates a `JsonElement`, not a `JsonNode`, and has no `HasErrors`.** The public `IOutputSchemaValidator.Validate(JsonNode instance)` signature from the story is preserved; conversion to `JsonElement` and use of the `Errors` dictionary are internal implementation details. No behavioural deviation.
+2. **`top_risks[]` item field names are camelCase** (`whyProblem`, `howToFix`, `estimatedEffort`), not the snake_case (`why_problem`, `how_to_fix`, `estimated_effort`) spelled in epics.md:1207. This follows the story's explicit "naming convention split (do not fix this)" Dev Note and architecture.md:663 (all output-schema object fields camelCase). `top_risks` is an optional target section at v1.0.0, so this affects no shipped output yet; the zero-risk sentinel `{severity:"none", text:...}` is deferred to the Story 4.11 version bump (noted in a schema `$comment`).
+3. **The gate was placed in an extracted internal `ProcessAgentResponseAsync` rather than inline in `RunPipelineAsync`.** Same file, same ordering (trim → validate → deserialize → build → store); the extraction is a testability seam (house "static/internal-helper-for-testability" style) because `RunPipelineAsync` requires a live `ServiceClient`/tool set that cannot be constructed in a unit test. This is what enables the AC-6 zero-store-call proxy test.

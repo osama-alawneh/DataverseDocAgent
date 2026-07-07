@@ -18,6 +18,14 @@ public static class JobFailureCodes
     /// <summary>Claude API or agent loop failed (AC-9).</summary>
     public const string AiError = "AI_ERROR";
 
+    /// <summary>
+    /// Claude's Mode 1 output failed validation against the versioned output
+    /// schema (<c>docs/output-schema-mode1.json</c>, ADR-006) before reaching
+    /// <c>DocxBuilder</c> (Story 4.1). Safe to retry — a re-run may produce a
+    /// contract-conforming response.
+    /// </summary>
+    public const string OutputSchemaViolation = "OUTPUT_SCHEMA_VIOLATION";
+
     /// <summary>Per-task 10-minute timeout exceeded (AC-9).</summary>
     public const string GenerationTimeout = "GENERATION_TIMEOUT";
 

@@ -4,6 +4,7 @@
 using System.Diagnostics;
 using System.ServiceModel;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Anthropic.SDK;
 using DataverseDocAgent.Api.Agent;
 using DataverseDocAgent.Api.Agent.Tools;
@@ -27,6 +28,7 @@ public sealed class DocumentGenerateService : IGenerationPipeline
     private readonly IDataverseConnectionFactory _connectionFactory;
     private readonly Func<AgentOrchestrator>     _orchestratorFactory;
     private readonly IDocumentStore              _documentStore;
+    private readonly IOutputSchemaValidator      _schemaValidator;
     private readonly ILogger<DocumentGenerateService> _logger;
 
     private static readonly JsonSerializerOptions s_jsonOptions = new()
@@ -38,11 +40,13 @@ public sealed class DocumentGenerateService : IGenerationPipeline
         IDataverseConnectionFactory connectionFactory,
         Func<AgentOrchestrator>     orchestratorFactory,
         IDocumentStore              documentStore,
+        IOutputSchemaValidator      schemaValidator,
         ILogger<DocumentGenerateService> logger)
     {
         _connectionFactory   = connectionFactory;
         _orchestratorFactory = orchestratorFactory;
         _documentStore       = documentStore;
+        _schemaValidator     = schemaValidator;
         _logger              = logger;
     }
 
@@ -182,12 +186,69 @@ public sealed class DocumentGenerateService : IGenerationPipeline
         var prompt       = PromptBuilder.BuildMode1Prompt();
         var rawResponse  = await orchestrator.RunAsync(prompt, tools, cancellationToken);
 
+        return await ProcessAgentResponseAsync(rawResponse, environmentUrl, cancellationToken);
+    }
+
+    // Story 4.1 — extracted from RunPipelineAsync so the schema gate and the
+    // response → docx → store flow are unit-testable without a live
+    // ServiceClient / tool set. The orchestration (tools + Claude loop) stays in
+    // RunPipelineAsync; everything from the max-iterations sentinel onward lives
+    // here. AC-6 proxy: on a schema violation this throws BEFORE DocxBuilder.Build
+    // and _documentStore.StoreAsync, so a spy store observes zero calls.
+    internal async Task<string> ProcessAgentResponseAsync(
+        string rawResponse,
+        string environmentUrl,
+        CancellationToken cancellationToken)
+    {
         if (string.Equals(rawResponse, AgentOrchestrator.MaxIterationsSentinel, StringComparison.Ordinal))
         {
             throw new GenerationFailureException(
                 JobFailureCodes.AiError,
                 safeToRetry: true,
                 "Agent loop exceeded iteration ceiling without producing a final response.");
+        }
+
+        // ── Schema gate (Story 4.1, ADR-006) ──────────────────────────────────
+        // Validate the JsonNode against the Mode 1 output contract BEFORE typed
+        // deserialisation, so contract drift or malformed output fails as
+        // OUTPUT_SCHEMA_VIOLATION with named schema paths rather than surfacing as
+        // an opaque AI_ERROR (JsonException) downstream. Non-JSON input the trim
+        // helpers cannot rescue falls through to ParseAgentJson's JsonException
+        // fallback (defence-in-depth — see comment at ParseAgentJson).
+        var trimmed = TrimToJsonObject(StripCodeFences(rawResponse));
+        if (!string.IsNullOrWhiteSpace(trimmed))
+        {
+            JsonNode? instance;
+            try
+            {
+                instance = JsonNode.Parse(trimmed);
+            }
+            catch (JsonException)
+            {
+                // Not parseable JSON — leave the AI_ERROR (JsonException) forensic
+                // path in ParseAgentJson to report it. A parse failure is not a
+                // schema violation.
+                instance = null;
+            }
+
+            if (instance is not null)
+            {
+                var validation = _schemaValidator.Validate(instance);
+                if (!validation.IsValid)
+                {
+                    // NFR-007 — schema/instance PATHS only, never instance values.
+                    // Bounded list (≤ MaxFailurePaths) built by the validator.
+                    _logger.LogWarning(
+                        "Mode 1 output failed schema validation ({Count} path(s), capped at {Max}): {Paths}",
+                        validation.FailurePaths.Count,
+                        OutputSchemaValidator.MaxFailurePaths,
+                        string.Join(" | ", validation.FailurePaths));
+                    throw new GenerationFailureException(
+                        JobFailureCodes.OutputSchemaViolation,
+                        safeToRetry: true,
+                        "Claude output failed Mode 1 schema validation.");
+                }
+            }
         }
 
         // ── Parse Claude JSON ─────────────────────────────────────────────────
