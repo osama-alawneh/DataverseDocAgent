@@ -12,6 +12,9 @@
 # Binary files
 *.zip binary
 
+# Snapshot manifests hash file bytes; preserve fixture bytes across Git checkouts.
+fixtures/sanitized-snapshot/*.json -text
+
 # Windows-specific scripts (if any)
 *.bat text eol=crlf
 *.ps1 text eol=crlf

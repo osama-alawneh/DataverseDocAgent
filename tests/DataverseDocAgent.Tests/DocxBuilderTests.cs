@@ -94,7 +94,7 @@ public class DocxBuilderTests
         // Story 3.7 AC-10 — Section 5 is suppressed only when both tables AND
         // application users are empty. For this empty-environment fixture the
         // section header must NOT render.
-        Assert.DoesNotContain("5. Application Users (Integration Signals)", text);
+        Assert.Contains("5. Application Users (Integration Signals)", text);
     }
 
     [Fact]
@@ -156,12 +156,12 @@ public class DocxBuilderTests
         var text = RenderText(BuildModelWithPrefix(summary, tableCount: 12));
 
         Assert.Contains("Publisher Prefix Summary", text);
-        Assert.Contains("All client customisations use the prefix 'vel_'.", text);
-        Assert.Contains("Microsoft components use msdyn_, msft_.", text);
-        Assert.Contains("No third-party ISV components detected.", text);
+        Assert.Contains("Publisher ownership is unknown", text);
+        Assert.DoesNotContain("Microsoft components use", text);
+        Assert.DoesNotContain("No third-party ISV components detected.", text);
         // Breakdown table rows appear AFTER the narrative; anchor the search
         // past the last narrative sentence so the assertion targets the table.
-        var afterNarrative = text.IndexOf("No third-party ISV components detected.", StringComparison.Ordinal);
+        var afterNarrative = text.IndexOf("Prefix names are a naming heuristic.", StringComparison.Ordinal);
         Assert.True(afterNarrative > 0, "Narrative anchor sentence missing.");
         var msdynIdx = text.IndexOf("msdyn_", afterNarrative, StringComparison.Ordinal);
         var msftIdx  = text.IndexOf("msft_",  afterNarrative, StringComparison.Ordinal);
@@ -186,7 +186,7 @@ public class DocxBuilderTests
 
         Assert.Contains("Publisher Prefix Summary", text);
         Assert.Contains(
-            "No client-defined publisher prefix detected — all custom components use default or Microsoft prefixes.",
+            "Publisher ownership is unknown",
             text);
     }
 
@@ -209,16 +209,16 @@ public class DocxBuilderTests
         var text = RenderText(BuildModelWithPrefix(summary, tableCount: 11));
 
         Assert.Contains(
-            "Multiple custom prefixes detected — environment may have multiple development teams or migration history.",
+            "Publisher ownership is unknown",
             text);
-        Assert.Contains("Primary client prefix: 'vel_' (5 components).", text);
+        Assert.DoesNotContain("Primary client prefix:", text);
         // Story 3.6 code-review P10 — variant 3 must NOT emit the variant-1
         // "Microsoft components use …" sentence. Lock the prose absence.
         Assert.DoesNotContain("Microsoft components use", text);
         // Story 3.6 code-review P14 — anchor breakdown-table assertion on a
         // stable phrase ("See full breakdown below.") instead of the
         // primary-sentence apostrophe shape, which is brittle to prose tweaks.
-        var afterNarrative = text.IndexOf("See full breakdown below.", StringComparison.Ordinal);
+        var afterNarrative = text.IndexOf("Prefix names are a naming heuristic.", StringComparison.Ordinal);
         Assert.True(afterNarrative > 0, "Narrative anchor sentence missing.");
         var msdynIdx  = text.IndexOf("msdyn_", afterNarrative, StringComparison.Ordinal);
         var velRowIdx = text.IndexOf("vel_",   afterNarrative, StringComparison.Ordinal);
@@ -245,9 +245,9 @@ public class DocxBuilderTests
 
         var text = RenderText(BuildModelWithPrefix(summary, tableCount: 4));
 
-        Assert.Contains("All client customisations use the prefix 'vel_'.", text);
+        Assert.Contains("Publisher ownership is unknown", text);
         Assert.DoesNotContain("Microsoft components use", text);
-        Assert.Contains("No third-party ISV components detected.", text);
+        Assert.DoesNotContain("No third-party ISV components detected.", text);
     }
 
     [Fact]
@@ -291,7 +291,7 @@ public class DocxBuilderTests
 
         var text = RenderText(BuildModelWithPrefix(summary, tableCount: 2));
 
-        Assert.Contains("Primary client prefix: 'acme_' (1 component).", text);
+        Assert.Contains("Publisher ownership is unknown", text);
         Assert.DoesNotContain("(1 components)", text);
     }
 
@@ -343,7 +343,7 @@ public class DocxBuilderTests
         // Sentinel preserved verbatim per AC-4 / AC-9.
         Assert.Contains(GetApplicationUsersTool.RoleLookupUnavailableSentinel,        text);
         // Empty list fallback prose must NOT be emitted when users exist.
-        Assert.DoesNotContain("No application users registered in this environment.", text);
+        Assert.DoesNotContain("No application user records are available in this snapshot. See collection coverage.", text);
     }
 
     [Fact]
@@ -364,7 +364,7 @@ public class DocxBuilderTests
             "Application users are typically used by external integrations. The following "
             + "application users are registered and may be writing to tables in this environment.",
             text);
-        Assert.Contains("No application users registered in this environment.", text);
+        Assert.Contains("No application user records are available in this snapshot. See collection coverage.", text);
         // No table headers when the user list is empty.
         Assert.DoesNotContain("Display Name", text);
         Assert.DoesNotContain("Application ID", text);
@@ -451,12 +451,12 @@ public class DocxBuilderTests
     }
 
     [Fact]
-    public void Build_ApplicationUsersSection_NullRolesProperty_RendersNoRolesAssigned()
+    public void Build_ApplicationUsersSection_NullRolesProperty_RendersLookupUnavailable()
     {
         // Story 3.7 code-review P8 — a `"roles": null` JSON payload from a
         // flaky Claude response deserialises to a null Roles slot
         // (ApplicationUserInfo.Roles is nullable). The renderer must treat
-        // null exactly like an empty list — "(no roles assigned)".
+        // null as unknown, distinct from a successfully returned empty list.
         var users = new[]
         {
             new ApplicationUserInfo
@@ -469,7 +469,7 @@ public class DocxBuilderTests
 
         var text = RenderText(BuildModelWithApplicationUsers(users, tableCount: 1));
 
-        Assert.Contains("(no roles assigned)", text);
+        Assert.Contains(GetApplicationUsersTool.RoleLookupUnavailableSentinel, text);
     }
 
     [Fact]
@@ -478,7 +478,7 @@ public class DocxBuilderTests
         // Direct exercise of the helper guarantees the sentinel-only,
         // null-input, dedupe, and trim branches are pinned even if the
         // higher-level render path stops touching them.
-        Assert.Equal("(no roles assigned)", DocxBuilder.FormatRolesCell(null));
+        Assert.Equal(GetApplicationUsersTool.RoleLookupUnavailableSentinel, DocxBuilder.FormatRolesCell(null));
         Assert.Equal("(no roles assigned)", DocxBuilder.FormatRolesCell(Array.Empty<string>()));
         Assert.Equal(
             GetApplicationUsersTool.RoleLookupUnavailableSentinel,
@@ -489,24 +489,22 @@ public class DocxBuilderTests
             }));
         Assert.Equal("Reader, Writer",
             DocxBuilder.FormatRolesCell(new[] { "Reader", "  Writer  ", "Reader" }));
-        Assert.Equal("(no roles assigned)",
+        Assert.Equal(GetApplicationUsersTool.RoleLookupUnavailableSentinel,
             DocxBuilder.FormatRolesCell(new string?[] { null, "", "   " }!.Cast<string>().ToArray()));
     }
 
     [Fact]
-    public void Build_ApplicationUsersSection_FullyEmptyEnvironment_OmitsSectionHeader()
+    public void Build_ApplicationUsersSection_FullyEmptyEnvironment_DisclosesUnknownCoverage()
     {
-        // AC-10 — when Tables.Count == 0 AND ApplicationUsers.Count == 0 the
-        // section heading must NOT render. This is the only branch where the
-        // header is suppressed.
+        // Even empty inventories retain the section and direct readers to coverage.
         var model = BuildModelWithApplicationUsers(
             users: Array.Empty<ApplicationUserInfo>(),
             tableCount: 0);
 
         var text = RenderText(model);
 
-        Assert.DoesNotContain("5. Application Users (Integration Signals)", text);
-        Assert.DoesNotContain(
+        Assert.Contains("5. Application Users (Integration Signals)", text);
+        Assert.Contains(
             "Application users are typically used by external integrations.",
             text);
     }

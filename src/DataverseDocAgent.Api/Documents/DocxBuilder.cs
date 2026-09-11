@@ -41,10 +41,22 @@ public static class DocxBuilder
 
             AppendTitle(body, $"{TitlePrefix} — {model.Summary.EnvironmentName ?? "Unknown Environment"}");
             AppendExecutiveSummary(body, model.Summary);
+            AppendHeading(body, "Collection and analysis coverage", level: 1);
+            AppendParagraph(body, "Counts describe collected evidence only. Missing or failed collection is not evidence of absence. Complexity is based on the collected scope.");
+            if (model.Coverage.Count == 0) AppendParagraph(body, "Coverage was not supplied; completeness is unknown.");
+            foreach (var item in model.Coverage) AppendBulletParagraph(body, item);
             AppendCustomTablesSection(body, model.Tables);
             AppendFieldCatalogueSection(body, model.Tables, model.Fields);
             AppendRelationshipMapSection(body, model.Tables, model.Relationships);
             AppendApplicationUsersSection(body, model.Tables, model.ApplicationUsers);
+            AppendHeading(body, "6. Authoritative evidence references", level: 1);
+            AppendParagraph(body, "The following records preserve the collected metadata. AI observations above are labelled separately and do not replace these facts.");
+            foreach (var item in model.Evidence)
+            {
+                AppendHeading(body, item.Id, level: 2);
+                AppendParagraph(body, $"Kind: {item.Kind}; parent: {item.ParentId ?? "none"}");
+                AppendParagraph(body, item.RawJson);
+            }
 
             mainPart.Document.Save();
         }
@@ -153,51 +165,14 @@ public static class DocxBuilder
 
     private static string BuildPrefixNarrative(PublisherPrefixSummary p)
     {
-        // AC-5 branches are deterministic on the analyzer output shape so the
-        // sub-section prose is reproducible across runs (FR-042).
-        //
-        // Note: AC-5 variant 1 carries a pipe-alternation second form
-        // ("n additional non-Microsoft prefixes detected — see breakdown below.")
-        // whose trigger would be "≥2 prefixes in the Client/ISV bucket". That
-        // condition routes into variant 3 instead, so the second form is
-        // unreachable BY DESIGN — variant 1 always emits the
-        // "No third-party ISV components detected." sentence. Story 3.6
-        // code-review P6 — documented inline so a future maintainer does not
-        // mistake the choice for a missing branch.
-        if (p.ClientPrefixes.Count == 0)
-        {
-            return "No client-defined publisher prefix detected — all custom components use default or Microsoft prefixes.";
-        }
-
-        if (p.ClientPrefixes.Count == 1)
-        {
-            var primary = p.ClientPrefixes[0].Prefix;
-            var sb = new StringBuilder();
-            sb.Append("All client customisations use the prefix '").Append(primary).Append("_'.");
-            if (p.MicrosoftPrefixes.Count > 0)
-            {
-                var msList = string.Join(", ", p.MicrosoftPrefixes.Select(m => m.Prefix + "_"));
-                sb.Append(" Microsoft components use ").Append(msList).Append('.');
-            }
-            sb.Append(" No third-party ISV components detected.");
-            return sb.ToString();
-        }
-
-        // Story 3.6 code-review P4 — singular/plural agreement: a primary with
-        // ComponentCount == 1 must read "1 component", not "1 components".
-        var top  = p.ClientPrefixes[0];
-        var unit = top.ComponentCount == 1 ? "component" : "components";
-        return
-            "Multiple custom prefixes detected — environment may have multiple development teams or migration history. " +
-            $"Primary client prefix: '{top.Prefix}_' ({top.ComponentCount} {unit}). See full breakdown below.";
+        return "Prefix names are a naming heuristic. Publisher ownership is unknown without solution and publisher metadata; prefixes do not establish Microsoft, client, or ISV ownership.";
     }
-
     private static void AppendCustomTablesSection(Body body, IReadOnlyList<TableInfo> tables)
     {
         AppendHeading(body, "2. Custom Tables", level: 1);
         if (tables.Count == 0)
         {
-            AppendParagraph(body, "No custom tables were discovered in this environment.", italic: true);
+            AppendParagraph(body, "No custom table records are available in this snapshot. See collection coverage.", italic: true);
             return;
         }
 
@@ -226,7 +201,7 @@ public static class DocxBuilder
         AppendHeading(body, "3. Field Catalogue", level: 1);
         if (tables.Count == 0)
         {
-            AppendParagraph(body, "No fields to catalogue (no custom tables).", italic: true);
+            AppendParagraph(body, "No field catalogue is available. See collection coverage.", italic: true);
             return;
         }
 
@@ -235,7 +210,7 @@ public static class DocxBuilder
             AppendHeading(body, table.DisplayName ?? table.LogicalName, level: 2);
             if (!fieldsByTable.TryGetValue(table.LogicalName, out var fields) || fields.Count == 0)
             {
-                AppendParagraph(body, "No custom fields on this table.", italic: true);
+                AppendParagraph(body, "No custom field records are available for this table. See collection coverage.", italic: true);
                 continue;
             }
 
@@ -261,18 +236,15 @@ public static class DocxBuilder
         + "application users are registered and may be writing to tables in this environment.";
 
     private const string NoApplicationUsersSentence =
-        "No application users registered in this environment.";
+        "No application user records are available in this snapshot. See collection coverage.";
 
     private static void AppendApplicationUsersSection(
         Body body,
         IReadOnlyList<TableInfo> tables,
         IReadOnlyList<ApplicationUserInfo> applicationUsers)
     {
-        // AC-10 — section is suppressed only when the document is otherwise
-        // empty (no tables AND no application users). For any populated
-        // environment the section header + FR-050 prose paragraph is always
-        // present, even when the user list itself is empty.
-        if (tables.Count == 0 && applicationUsers.Count == 0) return;
+        // Always retain the section so an empty or failed extraction remains visible.
+
 
         AppendHeading(body, "5. Application Users (Integration Signals)", level: 1);
         AppendParagraph(body, ApplicationUsersProse);
@@ -284,7 +256,7 @@ public static class DocxBuilder
         }
 
         // AC-9 — three-column table: Display Name | Application ID | Roles.
-        // Empty role list renders the literal "(no roles assigned)" so the
+        // An explicit empty role list renders "(no roles assigned)" so the
         // cell is never blank; the sentinel "(role lookup unavailable)" from
         // GetApplicationUsersTool is preserved verbatim. Story 3.7
         // code-review P6 routes role-list rendering through a single helper
@@ -307,7 +279,7 @@ public static class DocxBuilder
     internal static string FormatRolesCell(IReadOnlyList<string>? roles)
     {
         // Story 3.7 code-review P6 / P7.
-        // 1. Null / empty input → "(no roles assigned)".
+        // 1. Missing roles mean unavailable; an explicit empty array means no roles returned.
         // 2. If the role-lookup sentinel appears anywhere in the array,
         //    render the sentinel ALONE (the lookup failed; mixing it with
         //    other entries would be semantically meaningless and is the
@@ -315,7 +287,8 @@ public static class DocxBuilder
         //    prevent).
         // 3. Otherwise: filter null / whitespace entries, dedupe (preserves
         //    first-occurrence order), and join with ", ".
-        if (roles is null || roles.Count == 0) return "(no roles assigned)";
+        if (roles is null) return GetApplicationUsersTool.RoleLookupUnavailableSentinel;
+        if (roles.Count == 0) return "(no roles assigned)";
 
         foreach (var role in roles)
         {
@@ -329,7 +302,7 @@ public static class DocxBuilder
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
-        return cleaned.Count == 0 ? "(no roles assigned)" : string.Join(", ", cleaned);
+        return cleaned.Count == 0 ? GetApplicationUsersTool.RoleLookupUnavailableSentinel : string.Join(", ", cleaned);
     }
 
     private static void AppendRelationshipMapSection(
@@ -340,7 +313,7 @@ public static class DocxBuilder
         AppendHeading(body, "4. Relationship Map", level: 1);
         if (tables.Count == 0)
         {
-            AppendParagraph(body, "No relationships to map (no custom tables).", italic: true);
+            AppendParagraph(body, "No relationship map is available. See collection coverage.", italic: true);
             return;
         }
 
@@ -349,7 +322,7 @@ public static class DocxBuilder
             AppendHeading(body, table.DisplayName ?? table.LogicalName, level: 2);
             if (!relsByTable.TryGetValue(table.LogicalName, out var rels) || rels.Count == 0)
             {
-                AppendParagraph(body, "No custom relationships on this table.", italic: true);
+                AppendParagraph(body, "No relationship records are available for this table. See collection coverage.", italic: true);
                 continue;
             }
 
@@ -468,12 +441,13 @@ public static class DocxBuilder
         var tblProps = new TableProperties(
             new TableBorders(
                 new TopBorder    { Val = BorderValues.Single, Size = 4 },
-                new BottomBorder { Val = BorderValues.Single, Size = 4 },
                 new LeftBorder   { Val = BorderValues.Single, Size = 4 },
+                new BottomBorder { Val = BorderValues.Single, Size = 4 },
                 new RightBorder  { Val = BorderValues.Single, Size = 4 },
                 new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4 },
                 new InsideVerticalBorder   { Val = BorderValues.Single, Size = 4 }));
         table.AppendChild(tblProps);
+        table.AppendChild(new TableGrid(headers.Select(_ => new GridColumn())));
 
         // Header row
         var headerRow = new TableRow();

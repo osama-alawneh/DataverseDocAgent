@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "runId": "sanitized-demonstration",
+  "createdUtc": "2026-09-11T00:00:00Z",
+  "componentCount": 8,
+  "files": [
+    {
+      "path": "coverage.json",
+      "sha256": "6B52DFD8C4DDC482F1DCD0D3E3D9DDA67A3145BE70E0138DB396382F6787F42C"
+    },
+    {
+      "path": "components-00000.json",
+      "sha256": "533508DA1EB64F9C72B49DB2896223CC7FA7460230F6AB6F5D487561884509D7"
+    }
+  ]
+}

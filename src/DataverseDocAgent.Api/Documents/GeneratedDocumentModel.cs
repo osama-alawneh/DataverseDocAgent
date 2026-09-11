@@ -2,14 +2,11 @@
 // F-055 — FR-050 — Top-level ApplicationUsers slot (Story 3.7)
 namespace DataverseDocAgent.Api.Documents;
 
-/// <summary>
-/// Strongly-typed view of Claude's Mode 1 output after it has been parsed and
-/// enriched with deterministic values (scan date, complexity rating, counts).
-/// <see cref="DocxBuilder"/> consumes only this type so the JSON parsing rules
-/// are isolated in <c>DocumentGenerateService</c>.
-/// </summary>
+/// <summary>Collected inventory and naming counts; ownership is not established by naming prefixes.</summary>
 public sealed class GeneratedDocumentModel
 {
+    public IReadOnlyList<string> Coverage { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<DocumentEvidence> Evidence { get; init; } = Array.Empty<DocumentEvidence>();
     public required ExecutiveSummary                       Summary       { get; init; }
     public required IReadOnlyList<TableInfo>               Tables        { get; init; }
     public required IReadOnlyDictionary<string, IReadOnlyList<FieldInfo>>        Fields        { get; init; }
@@ -21,6 +18,8 @@ public sealed class GeneratedDocumentModel
     // emit a top-level Section 5 without reaching into the executive summary.
     public required IReadOnlyList<ApplicationUserInfo> ApplicationUsers { get; init; }
 }
+
+public sealed record DocumentEvidence(string Id, string Kind, string? ParentId, string RawJson);
 
 public sealed class ExecutiveSummary
 {
@@ -68,19 +67,11 @@ public sealed class RelationshipInfo
     public          string? BusinessMeaning  { get; init; }
 }
 
-// Story 3.7 — F-055 / FR-050. Snapshot of one application (non-human integration)
-// user as surfaced by `get_application_users`. Roles is initialised so a *missing*
-// JSON key deserialises to an empty list (System.Text.Json preserves the init
-// expression when the JSON omits the property), but Roles is declared nullable
-// because an *explicit* JSON `"roles": null` from a flaky Claude payload would
-// otherwise stomp the init expression with a real null on a non-nullable slot —
-// honest typing prevents a future caller from NRE'ing on `Roles.Count`. The
-// renderer (`DocxBuilder.FormatRolesCell`) accepts the nullable type and
-// emits "(no roles assigned)" for null/empty inputs.
+// Null or missing roles mean lookup unavailable; an explicit empty list means no roles returned.
 public sealed class ApplicationUserInfo
 {
     public          string?                DisplayName   { get; init; }
     public          string?                ApplicationId { get; init; }
     public          string?                Email         { get; init; }
-    public          IReadOnlyList<string>? Roles         { get; init; } = Array.Empty<string>();
+    public          IReadOnlyList<string>? Roles         { get; init; }
 }

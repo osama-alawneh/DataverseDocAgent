@@ -65,6 +65,9 @@ public class GetRelationshipsToolTests
         var rels = JsonDocument.Parse(json).RootElement.GetProperty("relationships");
         Assert.Equal(1, rels.GetArrayLength());
         var r = rels[0];
+        Assert.Equal("contact", r.GetProperty("referencingEntity").GetString());
+        Assert.Equal("account", r.GetProperty("referencedEntity").GetString());
+        Assert.Equal("new_lookupid", r.GetProperty("referencingAttribute").GetString());
         Assert.Equal("OneToMany",           r.GetProperty("relationshipType").GetString());
         Assert.Equal("new_account_contact", r.GetProperty("schemaName").GetString());
         Assert.Equal("contact",             r.GetProperty("relatedEntity").GetString());
@@ -127,6 +130,8 @@ public class GetRelationshipsToolTests
 
         var r = JsonDocument.Parse(json).RootElement.GetProperty("relationships")[0];
         Assert.Equal("ManyToMany",       r.GetProperty("relationshipType").GetString());
+        Assert.Equal("user", r.GetProperty("entity1LogicalName").GetString());
+        Assert.Equal("group", r.GetProperty("entity2LogicalName").GetString());
         Assert.Equal("new_users_groups", r.GetProperty("schemaName").GetString());
         Assert.Equal("group",            r.GetProperty("relatedEntity").GetString());
     }
@@ -184,10 +189,10 @@ public class GetRelationshipsToolTests
         Assert.False(r.TryGetProperty("unshare", out _), "unshare slot must be dropped");
     }
 
-    // ── AC-3 (R-HF-10): negative — referencingEntity + referencedEntity NEVER appear ─
+    // Deterministic evidence preserves relationship direction and lookup identity.
 
     [Fact]
-    public async Task ExecuteAsync_OneToMany_NeverEmitsReferencingOrReferencedEntity()
+    public async Task ExecuteAsync_OneToMany_PreservesReferencingAndReferencedEntity()
     {
         var rel = BuildOneToMany("new_a", "child", "parent", BuildCascade());
         var entity = BuildEntityMetadata("parent", oneToMany: new[] { rel });
@@ -199,16 +204,15 @@ public class GetRelationshipsToolTests
         var json = await tool.ExecuteAsync(InputFor("parent"));
 
         var r = JsonDocument.Parse(json).RootElement.GetProperty("relationships")[0];
-        Assert.False(r.TryGetProperty("referencingEntity", out _),
-            "R-HF-10: referencingEntity must not appear in the slimmed payload");
-        Assert.False(r.TryGetProperty("referencedEntity", out _),
-            "R-HF-10: referencedEntity must not appear in the slimmed payload");
+        Assert.Equal("child", r.GetProperty("referencingEntity").GetString());
+        Assert.Equal("parent", r.GetProperty("referencedEntity").GetString());
+        Assert.Equal("new_lookupid", r.GetProperty("referencingAttribute").GetString());
     }
 
-    // ── AC-3 (R-HF-10): negative — entity1LogicalName + entity2LogicalName NEVER appear on N:N ─
+    // Deterministic evidence retains both N:N endpoints.
 
     [Fact]
-    public async Task ExecuteAsync_ManyToMany_NeverEmitsEntity1OrEntity2()
+    public async Task ExecuteAsync_ManyToMany_PreservesEntity1AndEntity2()
     {
         var rel = BuildManyToMany("new_users_groups", "user", "group");
         var entity = BuildEntityMetadata("user", manyToMany: new[] { rel });
@@ -220,10 +224,8 @@ public class GetRelationshipsToolTests
         var json = await tool.ExecuteAsync(InputFor("user"));
 
         var r = JsonDocument.Parse(json).RootElement.GetProperty("relationships")[0];
-        Assert.False(r.TryGetProperty("entity1LogicalName", out _),
-            "R-HF-10: entity1LogicalName must not appear on N:N output");
-        Assert.False(r.TryGetProperty("entity2LogicalName", out _),
-            "R-HF-10: entity2LogicalName must not appear on N:N output");
+        Assert.Equal("user", r.GetProperty("entity1LogicalName").GetString());
+        Assert.Equal("group", r.GetProperty("entity2LogicalName").GetString());
     }
 
     // ── AC-3: filter out non-custom relationships ─────────────────────────────
@@ -564,6 +566,7 @@ public class GetRelationshipsToolTests
             SchemaName           = schemaName,
             ReferencingEntity    = referencingEntity,
             ReferencedEntity     = referencedEntity,
+            ReferencingAttribute = "new_lookupid",
             CascadeConfiguration = cascade,
         };
         SetNonPublic(rel, nameof(OneToManyRelationshipMetadata.IsCustomRelationship), (bool?)isCustom);

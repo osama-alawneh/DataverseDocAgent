@@ -512,4 +512,7 @@ $RECYCLE.BIN/
 # DataverseDocAgent — sensitive/generated files (AC: 5)
 appsettings.Development.json
 secrets.json
+# Local evidence, Codex requests/checkpoints, reports and verification caches
+.dataverse-runs/
 # artefacts/ — tracked: contains importable Dataverse solution (Story 2.3)
+!fixtures/sanitized-snapshot/coverage.json

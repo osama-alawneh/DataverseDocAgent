@@ -1,19 +1,7 @@
 // F-047 — FR-042 — Publisher Prefix Intelligence (Story 3.6)
 namespace DataverseDocAgent.Api.Documents;
 
-/// <summary>
-/// Deterministic publisher-prefix breakdown computed in C# host code
-/// (FR-011 / FR-042 — Claude is intentionally NOT trusted with this data).
-/// Consumed by <see cref="DocxBuilder"/> to render the
-/// "Publisher Prefix Summary" sub-section under the Executive Summary.
-///
-/// Buckets:
-///   <list type="bullet">
-///     <item><term>Microsoft</term><description>known Microsoft-owned prefixes (msdyn, msft, adx) and the Power Apps default-environment <c>cr[a-z0-9]*</c> family.</description></item>
-///     <item><term>Client/ISV</term><description>everything else with a recognisable prefix segment.</description></item>
-///     <item><term>Unprefixed</term><description>logical names without an underscore — never expected from <c>list_custom_tables</c>, surfaced as a single <c>(no prefix)</c> row when present.</description></item>
-///   </list>
-/// </summary>
+/// <summary>Collected inventory and naming counts; ownership is not established by naming prefixes.</summary>
 public sealed class PublisherPrefixSummary
 {
     public          string?                       PrimaryClientPrefix    { get; init; }

@@ -1,0 +1,67 @@
+[
+  {
+    "scope": "organisation",
+    "status": "complete",
+    "detail": "Organisation metadata retrieved."
+  },
+  {
+    "scope": "tables",
+    "status": "complete",
+    "detail": "Read 2 records successfully (including zero); shared relationships are stored once by schema name."
+  },
+  {
+    "scope": "fields:demo_project",
+    "status": "complete",
+    "detail": "Read 1 records successfully (including zero); shared relationships are stored once by schema name."
+  },
+  {
+    "scope": "relationships:demo_project",
+    "status": "complete",
+    "detail": "Read 1 records successfully (including zero); shared relationships are stored once by schema name."
+  },
+  {
+    "scope": "fields:demo_task",
+    "status": "complete",
+    "detail": "Read 2 records successfully (including zero); shared relationships are stored once by schema name."
+  },
+  {
+    "scope": "relationships:demo_task",
+    "status": "complete",
+    "detail": "Read 1 records successfully (including zero); shared relationships are stored once by schema name."
+  },
+  {
+    "scope": "application-users",
+    "status": "complete",
+    "detail": "Read 1 records successfully (including zero); shared relationships are stored once by schema name."
+  },
+  {
+    "scope": "standard-table-customizations",
+    "status": "excluded",
+    "detail": "Custom fields and relationships confined to standard tables are not enumerated; extraction visits returned custom tables only. Relationships touching a custom table may reference a standard table outside inventory."
+  },
+  {
+    "scope": "plugins-flows-javascript",
+    "status": "excluded",
+    "detail": "Plugin assemblies/steps, cloud flows, JavaScript/web resources, forms, views, business rules, and automation dependencies are not implemented by these extractors."
+  },
+  {
+    "scope": "solution-membership",
+    "status": "limitation",
+    "detail": "The custom table extractor does not query solution membership; missing solution names are unavailable, not evidence of no solution."
+  },
+  {
+    "scope": "sdk-cancellation",
+    "status": "limitation",
+    "detail": "Synchronous IOrganizationService calls cannot be interrupted; cancellation is checked before and after calls and between records."
+  },
+  {
+    "scope": "application-user-scope",
+    "status": "limitation",
+    "detail": "The extractor queries enabled, unlicensed users with an application ID. It does not paginate the SDK result; large inventories may be truncated. Role lookup failures are retained as an explicit sentinel and partial coverage."
+  },
+  {
+    "scope": "snapshot-consistency",
+    "status": "limitation",
+    "detail": "Metadata is read sequentially, not in a transactional environment snapshot. Extractor null SDK collections can appear as empty results; complete means the extractor returned a valid response, not independent proof of server completeness."
+  }
+]

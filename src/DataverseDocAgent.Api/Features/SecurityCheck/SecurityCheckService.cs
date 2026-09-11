@@ -119,20 +119,30 @@ public sealed class SecurityCheckService
                 return BuildErrorResponse(
                     "Permission check timed out. The Dataverse environment may be slow or unreachable. Please try again.");
             }
-            catch (InvalidOperationException ex)
+            catch (InvalidOperationException)
             {
                 // e.g. "No application user found" — safe to surface message
-                _logger.LogWarning("Permission check failed: {Message}", ex.Message);
-                return BuildErrorResponse(ex.Message);
+                _logger.LogWarning("Permission check failed during caller resolution");
+                return BuildErrorResponse("Permission check could not resolve the caller.");
             }
             catch (Exception ex)
             {
                 // Dataverse SDK errors (FaultException, etc.) — do not leak details
-                _logger.LogWarning(ex, "Permission check failed during privilege retrieval");
+                _logger.LogWarning("Permission check failed during privilege retrieval ({ExceptionType})", ex.GetType().Name);
                 return BuildErrorResponse(
                     "An error occurred while checking permissions. Please verify the environment is accessible and try again.");
             }
         }
+    }
+
+    /// <summary>Generation preflight reuses the connected client and the existing 13 privileges.</summary>
+    public static async Task<SecurityCheckResponse> CheckConnectedAsync(
+        ServiceClient client, CancellationToken cancellationToken = default)
+    {
+        var caller = await GetCallerUserIdAsync(client, cancellationToken);
+        var names = await GetUserPrivilegeNamesAsync(client, caller, cancellationToken);
+        var (passed, missing, extra) = ComputePrivilegeSets(names, RequiredPrivileges);
+        return BuildResponse(passed, missing, extra);
     }
 
     // ── Internal helpers (internal for unit-test visibility via InternalsVisibleTo) ──

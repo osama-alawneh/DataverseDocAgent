@@ -17,9 +17,10 @@ namespace DataverseDocAgent.Api.Agent.Tools;
 /// NON-self table on the edge — owning side is implicit because PromptBuilder emits
 /// the entry under the owning table's key), and <c>cascadeDelete</c> (mapped from
 /// <see cref="CascadeConfiguration.Delete"/>, defaulted to <c>"NoCascade"</c> when
-/// the SDK leaves it null). The dropped <c>cascadeConfiguration</c> quad
-/// (assign/share/unshare) and the <c>referencingEntity</c>/<c>referencedEntity</c>
-/// pair are NOT emitted. Any SDK fault is converted into the structured error JSON
+/// the SDK leaves it null). The <c>referencingEntity</c>/<c>referencedEntity</c>
+/// pair, referencing lookup attribute, and N:N endpoints are also retained for deterministic evidence.
+/// Assign/share/unshare cascade settings are not extracted.
+/// Any SDK fault is converted into the structured error JSON
 /// shape <c>{ "error", "tableName" }</c> so the agent loop receives a tool result
 /// rather than an exception (NFR-007 / AC-5).
 /// </summary>
@@ -174,6 +175,9 @@ public sealed class GetRelationshipsTool : IDataverseTool
                 RelationshipType = "OneToMany",
                 SchemaName       = r.SchemaName,
                 RelatedEntity    = relatedEntity,
+                ReferencingEntity = r.ReferencingEntity,
+                ReferencedEntity = r.ReferencedEntity,
+                ReferencingAttribute = r.ReferencingAttribute,
                 // R-HF-10: cascadeConfiguration quad collapsed to a single cascadeDelete
                 // string — PromptBuilder consumes only the delete behaviour. Null
                 // CascadeConfiguration defaults to "NoCascade" so Claude always sees
@@ -207,6 +211,8 @@ public sealed class GetRelationshipsTool : IDataverseTool
                 RelationshipType = "ManyToMany",
                 SchemaName       = r.SchemaName,
                 RelatedEntity    = relatedEntity,
+                Entity1LogicalName = r.Entity1LogicalName,
+                Entity2LogicalName = r.Entity2LogicalName,
             });
         }
     }
@@ -239,6 +245,9 @@ public sealed class GetRelationshipsTool : IDataverseTool
 
     private sealed class OneToManyDto
     {
+        public string? ReferencingEntity { get; set; }
+        public string? ReferencedEntity { get; set; }
+        public string? ReferencingAttribute { get; set; }
         public string? RelationshipType { get; set; }
         public string? SchemaName       { get; set; }
         public string? RelatedEntity    { get; set; }
@@ -251,6 +260,8 @@ public sealed class GetRelationshipsTool : IDataverseTool
 
     private sealed class ManyToManyDto
     {
+        public string? Entity1LogicalName { get; set; }
+        public string? Entity2LogicalName { get; set; }
         public string? RelationshipType { get; set; }
         public string? SchemaName       { get; set; }
         public string? RelatedEntity    { get; set; }

@@ -1,103 +1,127 @@
-// F-001–013 — Phase 1 POC console host
-// Story 1.3: Claude agent tool-use loop — ListCustomTables POC
-// Story 1.4: Timing instrumentation added
-using System.Diagnostics;
-using Anthropic.SDK;
-using DataverseDocAgent.Api.Agent;
 using DataverseDocAgent.Api.Agent.Tools;
+using DataverseDocAgent.Api.Documents;
+using DataverseDocAgent.Api.Features.SecurityCheck;
+using DataverseDocAgent.Api.Pipeline;
 using DataverseDocAgent.Shared.Dataverse;
-using Microsoft.Extensions.Configuration;
 
-var config = new ConfigurationBuilder()
-    .AddUserSecrets<Program>()
-    .Build();
-
-// ── Load Dataverse credentials ────────────────────────────────────────────────
-var credentials = new EnvironmentCredentials
-{
-    EnvironmentUrl = config["Dataverse:EnvironmentUrl"] ?? string.Empty,
-    TenantId       = config["Dataverse:TenantId"]       ?? string.Empty,
-    ClientId       = config["Dataverse:ClientId"]       ?? string.Empty,
-    ClientSecret   = config["Dataverse:ClientSecret"]   ?? string.Empty,
-};
-
-if (string.IsNullOrWhiteSpace(credentials.EnvironmentUrl) ||
-    string.IsNullOrWhiteSpace(credentials.TenantId)       ||
-    string.IsNullOrWhiteSpace(credentials.ClientId)       ||
-    string.IsNullOrWhiteSpace(credentials.ClientSecret))
-{
-    Console.WriteLine("Missing Dataverse credentials in User Secrets. " +
-                      "Run: dotnet user-secrets set \"Dataverse:EnvironmentUrl\" \"<url>\" (etc.)");
-    return;
-}
-
-// ── Load Anthropic API key ────────────────────────────────────────────────────
-var anthropicApiKey = config["Anthropic:ApiKey"] ?? string.Empty;
-if (string.IsNullOrWhiteSpace(anthropicApiKey))
-{
-    Console.WriteLine("Missing Anthropic API key in User Secrets. " +
-                      "Run: dotnet user-secrets set \"Anthropic:ApiKey\" \"<key>\"");
-    return;
-}
-
-// ── Connect to Dataverse ──────────────────────────────────────────────────────
-Console.WriteLine("Connecting to Dataverse...");
-var factory = new DataverseConnectionFactory();
-Microsoft.PowerPlatform.Dataverse.Client.ServiceClient serviceClient = null!;
-var connectSw = Stopwatch.StartNew();
+using var cancellation = new CancellationTokenSource();
+Console.CancelKeyPress += (_, e) => { e.Cancel = true; cancellation.Cancel(); };
 try
 {
-    serviceClient = await factory.ConnectAsync(credentials);
-    connectSw.Stop();
-    Console.WriteLine($"Connected. [connection time: {connectSw.ElapsedMilliseconds} ms]");
-}
-catch (DataverseConnectionException ex)
-{
-    connectSw.Stop();
-    Console.WriteLine($"Connection failed: {ex.Message}");
-    Environment.Exit(1);
-}
-finally
-{
-    connectSw.Stop(); // no-op if already stopped; guards non-DataverseConnectionException escapes
-}
-
-bool agentFailed = false;
-using (serviceClient)
-{
-    // ── Set up tools and orchestrator ─────────────────────────────────────────
-    var listTablesTool = new ListCustomTablesTool(serviceClient);
-    IReadOnlyList<IDataverseTool> tools = [listTablesTool];
-
-    var anthropicClient = new AnthropicClient(anthropicApiKey);
-    var orchestrator    = new AgentOrchestrator(anthropicClient);
-
-    const string Prompt =
-        "You are a Dataverse environment analyst. " +
-        "Use the available tools to list all custom tables in the environment and provide a summary.";
-
-    // ── Run agent loop and print result ───────────────────────────────────────
-    Console.WriteLine("\nRunning Claude agent loop...\n");
-    var agentSw = Stopwatch.StartNew();
+    if (args.Length == 0 || args[0] is "--help" or "-h")
+    {
+        Console.WriteLine("analyze --snapshot <directory> --run <directory> [--skills <root>] [--codex <executable>] [--model <model>]");
+        Console.WriteLine("collect --run <directory> | generate --run <directory> [--skills <root>] [--codex <executable>] [--model <model>]");
+        Console.WriteLine("Live collection reads DATAVERSE_ENVIRONMENT_URL, DATAVERSE_TENANT_ID, DATAVERSE_CLIENT_ID, DATAVERSE_CLIENT_SECRET from the environment only.");
+        return 0;
+    }
+    var command = args[0];
+    if (command is not ("analyze" or "collect" or "generate")) throw new ArgumentException();
+    var values = new Dictionary<string, string>(StringComparer.Ordinal);
+    var allowed = new HashSet<string> { "--snapshot", "--run", "--skills", "--codex", "--model" };
+    for (var i = 1; i < args.Length; i += 2)
+    {
+        if (!allowed.Contains(args[i]) || i + 1 >= args.Length || !values.TryAdd(args[i], args[i + 1])) throw new ArgumentException();
+    }
+    if (!values.TryGetValue("--run", out var run) || string.IsNullOrWhiteSpace(run)) throw new ArgumentException();
+    run = Path.GetFullPath(run);
+    Directory.CreateDirectory(run);
+    if ((File.GetAttributes(run) & FileAttributes.ReparsePoint) != 0) throw new IOException();
+    // Hold the workflow lock through analysis AND final DOCX publication. The scheduler's
+    // separate analysis lock alone ends too early to protect the complete report bundle.
+    var workflowLockPath = Path.Combine(run, ".workflow.lock");
+    if (File.Exists(workflowLockPath) && (File.GetAttributes(workflowLockPath) & FileAttributes.ReparsePoint) != 0)
+        throw new IOException();
+    await using var workflowLock = new FileStream(workflowLockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+    EvidenceSnapshot snapshot;
+    if (command == "analyze")
+    {
+        if (!values.TryGetValue("--snapshot", out var source)) throw new ArgumentException();
+        snapshot = await SnapshotStore.LoadAsync(source, cancellation.Token);
+    }
+    else
+    {
+        if (values.ContainsKey("--snapshot")) throw new ArgumentException();
+        // Keep credentials in the connection helper and release its reference before analysis.
+        snapshot = await CollectAsync(cancellation.Token);
+        await SnapshotStore.SaveAsync(snapshot, Path.Combine(run, "evidence"), cancellation.Token);
+        Console.WriteLine("Evidence snapshot saved.");
+        if (command == "collect") return 0;
+    }
+    var options = new PipelineOptions
+    {
+        SkillsRoot = Path.GetFullPath(values.GetValueOrDefault("--skills") ?? FindSkills()),
+        RunRoot = run
+    };
+    var runner = new CodexCliRunner(new CodexOptions
+    {
+        Executable = values.GetValueOrDefault("--codex") ?? "codex",
+        Model = values.GetValueOrDefault("--model")
+    });
+    var analysis = await new AnalysisPipeline(runner, options).RunAsync(snapshot, run, cancellation.Token);
+    var document = DocxBuilder.Build(ReportAssembler.Build(snapshot, analysis));
+    Directory.CreateDirectory(run);
+    var pending = Path.Combine(run, ".report-" + Guid.NewGuid().ToString("N") + ".tmp");
     try
     {
-        var result = await orchestrator.RunAsync(Prompt, tools);
-        agentSw.Stop();
-        Console.WriteLine($"[agent loop time: {agentSw.ElapsedMilliseconds} ms]");
-        Console.WriteLine("── Claude's response ──────────────────────────────────────");
-        if (string.Equals(result, AgentOrchestrator.MaxIterationsSentinel, StringComparison.Ordinal))
-            Console.WriteLine("[WARNING: agent loop hit iteration limit — response may be incomplete]");
-        Console.WriteLine(result);
-        Console.WriteLine("───────────────────────────────────────────────────────────");
+        await File.WriteAllBytesAsync(pending, document, cancellation.Token);
+        cancellation.Token.ThrowIfCancellationRequested();
+        File.Move(pending, Path.Combine(run, "report.docx"), overwrite: true);
     }
-    catch (Exception ex)
-    {
-        agentSw.Stop();
-        Console.WriteLine($"[agent loop time: {agentSw.ElapsedMilliseconds} ms] (failed)");
-        Console.WriteLine($"Agent loop failed: {ex.Message}");
-        agentFailed = true;
-    }
+    finally { if (File.Exists(pending)) File.Delete(pending); }
+    var partial = ReportAssembler.HasIncompleteCoverage(snapshot, analysis);
+    Console.WriteLine(partial
+        ? "Partial report saved as report.docx in the run directory. See coverage; rerun analysis to retry missing stages."
+        : "Analysis complete for the supported scope. Report saved as report.docx in the run directory.");
+    return partial ? 2 : 0;
+}
+catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+{
+    Console.Error.WriteLine("Operation cancelled."); return 130;
+}
+catch (AnalysisRunException ex)
+{
+    Console.Error.WriteLine($"Local analysis failed: {ex.Code}. Check Codex login/configuration and retry the same run directory."); return 1;
+}
+catch (ArgumentException)
+{
+    Console.Error.WriteLine("Invalid command or configuration. Use --help for supported options."); return 2;
+}
+catch (Exception)
+{
+    // Raw SDK errors and model output can contain environment data and are never printed.
+    Console.Error.WriteLine("Operation failed. Verify snapshot integrity, Dataverse permissions, and local output access."); return 1;
 }
 
-if (agentFailed)
-    Environment.Exit(1);
+static string FindSkills()
+{
+    for (var dir = new DirectoryInfo(Environment.CurrentDirectory); dir is not null; dir = dir.Parent)
+    {
+        var path = Path.Combine(dir.FullName, ".agents", "skills");
+        if (Directory.Exists(path)) return path;
+    }
+    throw new ArgumentException("Skills root is required.");
+}
+
+static async Task<EvidenceSnapshot> CollectAsync(CancellationToken ct)
+{
+    EnvironmentCredentials? credentials = new()
+    {
+        EnvironmentUrl = Environment.GetEnvironmentVariable("DATAVERSE_ENVIRONMENT_URL") ?? "",
+        TenantId = Environment.GetEnvironmentVariable("DATAVERSE_TENANT_ID") ?? "",
+        ClientId = Environment.GetEnvironmentVariable("DATAVERSE_CLIENT_ID") ?? "",
+        ClientSecret = Environment.GetEnvironmentVariable("DATAVERSE_CLIENT_SECRET") ?? ""
+    };
+    if (new[] { credentials.EnvironmentUrl, credentials.TenantId, credentials.ClientId, credentials.ClientSecret }.Any(string.IsNullOrWhiteSpace))
+        throw new ArgumentException();
+    var url = credentials.EnvironmentUrl;
+    Microsoft.PowerPlatform.Dataverse.Client.ServiceClient client;
+    try { client = await new DataverseConnectionFactory().ConnectAsync(credentials, ct); }
+    finally { credentials = null; }
+    using (client)
+    {
+        var check = await SecurityCheckService.CheckConnectedAsync(client, ct);
+        if (!check.SafeToRun) throw new InvalidOperationException("Required permissions are missing.");
+        return await new EvidenceCollector().CollectAsync(DataverseToolFactory.CreateMode1Tools(client, url), ct);
+    }
+}

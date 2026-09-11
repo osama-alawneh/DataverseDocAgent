@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <!-- F-001–040 — Phase 2 API host for all features -->
   <PropertyGroup>
@@ -15,7 +15,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Anthropic.SDK" Version="5.10.0" />
     <PackageReference Include="dnlib" Version="4.5.0" />
     <!-- Story 4.1 (ADR-006) — JSON Schema draft 2020-12 validation of Mode 1 output. Pinned exactly. -->
     <PackageReference Include="JsonSchema.Net" Version="9.2.2" />
@@ -27,13 +26,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DataverseDocAgent.Shared\DataverseDocAgent.Shared.csproj" />
-  </ItemGroup>
-
-  <!-- Story 4.1 (ADR-006) — ship the Mode 1 output schema alongside the assembly so
-       OutputSchemaValidator can load it by path from AppContext.BaseDirectory. No schema
-       string is embedded in C# code (AC-7). -->
-  <ItemGroup>
-    <Content Include="..\..\docs\output-schema-mode1.json" Link="docs\output-schema-mode1.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -16,7 +16,7 @@ Before you begin, make sure you have:
 - **Power Apps Maker Portal access** (`make.powerapps.com`) for the same environment.
 - The target **Dataverse environment URL** (e.g. `https://contoso.crm.dynamics.com`).
 - The DataverseDocAgent API base URL — referred to as `{API_BASE_URL}` below. If you do not yet have this, contact your DataverseDocAgent point of contact. Replace the placeholder with the real URL in Step 5.
-- The security role solution file `DataverseDocAgentSecurityRole_1_0_0_6_managed.zip`, downloaded from `/artefacts/` in the DataverseDocAgent repository.
+- The security role solution file `DataverseDocAgentSecurityRole_1_0_0_7_managed.zip`, downloaded from `/artefacts/` in the DataverseDocAgent repository.
 
 Total time: ~15 minutes.
 
@@ -63,7 +63,7 @@ The Application User now exists with zero privileges. This is intentional.
 
 This imports a managed solution containing a single custom security role, `DataverseDocAgent Reader`, with exactly the read privileges required — nothing more.
 
-1. Download `DataverseDocAgentSecurityRole_1_0_0_6_managed.zip` from the `/artefacts/` folder of the DataverseDocAgent repository.
+1. Download `DataverseDocAgentSecurityRole_1_0_0_7_managed.zip` from the `/artefacts/` folder of the DataverseDocAgent repository.
 2. Navigate to **`make.powerapps.com`** → select the same **environment** → **Solutions** → **Import solution**.
 3. Click **Browse**, select the `.zip` file, then **Next** → **Import**.
 4. Wait for the import to complete (typically under a minute).

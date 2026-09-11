@@ -1,500 +1,164 @@
-// F-001, F-013, NFR-014 — Story 3.5 DocumentGenerateService pipeline tests
-// F-047 — Story 3.6 PrefixSummary enrichment integration test
 using System.Text.Json;
-using DataverseDocAgent.Api.Agent;
 using DataverseDocAgent.Api.Documents;
 using DataverseDocAgent.Api.Features.DocumentGenerate;
 using DataverseDocAgent.Api.Jobs;
+using DataverseDocAgent.Api.Pipeline;
 using DataverseDocAgent.Api.Storage;
 using DataverseDocAgent.Shared.Dataverse;
+using DocumentFormat.OpenXml.Packaging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.PowerPlatform.Dataverse.Client;
 
 namespace DataverseDocAgent.Tests;
 
 public class DocumentGenerateServiceTests
 {
     [Theory]
-    [InlineData("{\"organisation\":{\"environmentName\":\"x\"}}",            "x")]
-    [InlineData("```json\n{\"organisation\":{\"environmentName\":\"x\"}}\n```", "x")]
-    [InlineData("```\n{\"organisation\":{\"environmentName\":\"x\"}}\n```",    "x")]
-    public void ParseAgentJson_StripsCodeFences_ParsesOrganisation(string raw, string expectedName)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SnapshotPipeline_PersistsEvidenceAndPublishesOnlyAfterValidatedAnalysis(bool cancel)
     {
-        var model = DocumentGenerateService.ParseAgentJson(raw);
-        Assert.NotNull(model);
-        Assert.Equal(expectedName, model.Organisation?.EnvironmentName);
-    }
-
-    [Fact]
-    public void ParseAgentJson_EmptyResponse_ThrowsAiError()
-    {
-        var ex = Assert.Throws<GenerationFailureException>(
-            () => DocumentGenerateService.ParseAgentJson("   "));
-        Assert.Equal(JobFailureCodes.AiError, ex.Code);
-        Assert.True(ex.SafeToRetry);
-    }
-
-    [Fact]
-    public void ParseAgentJson_InvalidJson_ThrowsAiError()
-    {
-        var ex = Assert.Throws<GenerationFailureException>(
-            () => DocumentGenerateService.ParseAgentJson("not-json"));
-        Assert.Equal(JobFailureCodes.AiError, ex.Code);
-    }
-
-    [Fact]
-    public void StripCodeFences_NoFences_ReturnsTrimmedInput()
-    {
-        var result = DocumentGenerateService.StripCodeFences("  {\"k\":1}  ");
-        Assert.Equal("{\"k\":1}", result);
-    }
-
-    [Fact]
-    public void StripCodeFences_NoLeadingFence_PreservesTrailingBackticks()
-    {
-        // Story 3.5 code-review P4 — a fence-less JSON body whose string content
-        // ends in three backticks must survive intact. Previously the trailing
-        // strip ran unconditionally and corrupted the body.
-        const string body = "{\"x\":\"code: ```\"}";
-        var result = DocumentGenerateService.StripCodeFences(body);
-        Assert.Equal(body, result);
-    }
-
-    [Fact]
-    public void StripCodeFences_LeadingJsonFence_StripsBothEnds()
-    {
-        var result = DocumentGenerateService.StripCodeFences("```json\n{\"x\":1}\n```");
-        Assert.Equal("{\"x\":1}", result);
-    }
-
-    // Story 3.6 — F-047. The Mode 1 enrichment step feeds PrefixAnalyzer the
-    // tables Claude returns. The orchestrator and controller layers are
-    // unchanged, so a parse → analyze handshake test is enough to lock in
-    // that the enriched model carries a PrefixSummary derived from the JSON.
-    [Fact]
-    public void ParseAgentJson_TablesFeedPrefixAnalyzer_ProducesEnrichedSummary()
-    {
-        const string raw = """
-            {
-              "organisation": { "environmentName": "Contoso" },
-              "tables": [
-                { "logicalName": "vel_account" },
-                { "logicalName": "vel_contact" },
-                { "logicalName": "msdyn_thing" },
-                { "logicalName": "cr3a7_widget" }
-              ]
-            }
-            """;
-
-        var parsed   = DocumentGenerateService.ParseAgentJson(raw);
-        var tables   = (IReadOnlyList<TableInfo>?)parsed.Tables ?? Array.Empty<TableInfo>();
-        var summary  = PrefixAnalyzer.Analyze(tables);
-
-        Assert.Equal("vel", summary.PrimaryClientPrefix);
-        Assert.False(summary.NoClientPrefixDetected);
-        // Story 3.6 code-review P11 — assert the prefix value too, not just
-        // the count, so a regression that bucketed by full logical name
-        // (instead of segment) would still fail this test.
-        Assert.Equal("vel", summary.ClientPrefixes[0].Prefix);
-        Assert.Equal(2, summary.ClientPrefixes[0].ComponentCount);
-        // msdyn + cr3a7 → Microsoft bucket (cr3a7 matches ^cr[a-z0-9]*$).
-        Assert.Equal(2, summary.MicrosoftPrefixes.Count);
-        Assert.Contains(summary.MicrosoftPrefixes, p => p.Prefix == "msdyn");
-        Assert.Contains(summary.MicrosoftPrefixes, p => p.Prefix == "cr3a7");
-    }
-
-    // Story 3.7 AC-11 — DocumentGenerateService must defend against a Claude
-    // response that omits the `applicationUsers` key entirely (e.g. older
-    // four-key shape from Story 3.5, or a prompt-drift regression). The
-    // missing key parses as a null `ApplicationUsers` on AgentJsonModel and
-    // is safe-coalesced to an empty list before the renderer sees it — the
-    // pipeline must NOT raise AI_ERROR for this case.
-    [Fact]
-    public void ParseAgentJson_MissingApplicationUsersKey_DeserialisesToNull_ForSafeCoalesce()
-    {
-        const string raw = """
-            {
-              "organisation": { "environmentName": "Contoso" },
-              "tables": [
-                { "logicalName": "vel_account" }
-              ]
-            }
-            """;
-
-        var parsed = DocumentGenerateService.ParseAgentJson(raw);
-
-        // Null sentinel — service-level safe-coalesce (parsed.ApplicationUsers?…
-        // ?? Array.Empty<ApplicationUserInfo>()) turns this into the empty
-        // Section 5 render branch (AC-10).
-        Assert.Null(parsed.ApplicationUsers);
-    }
-
-    // E2E hotfix 2026-05-14 (R-HF-5) — Claude routinely chats before the
-    // JSON despite the "JSON only" prompt rule. TrimToJsonObject anchors
-    // on the first `{`/`[` and last `}`/`]` so a prose preamble / tail
-    // does not abort parsing.
-    [Fact]
-    public void TrimToJsonObject_ProsePreamble_TrimsToObject()
-    {
-        const string raw =
-            "All data has been collected. Here is the JSON.\n\n"
-            + "- Some bullet point about tables.\n\n"
-            + "{ \"organisation\": { \"environmentName\": \"x\" } }";
-        var trimmed = DocumentGenerateService.TrimToJsonObject(raw);
-        Assert.StartsWith("{", trimmed);
-        Assert.EndsWith("}",   trimmed);
-        Assert.DoesNotContain("All data has been collected.", trimmed);
-        Assert.DoesNotContain("Some bullet point",            trimmed);
-    }
-
-    [Fact]
-    public void TrimToJsonObject_ProseTail_TrimsToObject()
-    {
-        const string raw =
-            "{ \"organisation\": { \"environmentName\": \"x\" } }\n\n"
-            + "Let me know if you need more detail.";
-        var trimmed = DocumentGenerateService.TrimToJsonObject(raw);
-        Assert.EndsWith("}", trimmed);
-        Assert.DoesNotContain("Let me know", trimmed);
-    }
-
-    [Fact]
-    public void TrimToJsonObject_AlreadyClean_IsNoOp()
-    {
-        const string raw = "{\"x\":1}";
-        Assert.Equal(raw, DocumentGenerateService.TrimToJsonObject(raw));
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void TrimToJsonObject_NullOrWhitespace_ReturnsEmpty(string? raw)
-    {
-        Assert.Equal(string.Empty, DocumentGenerateService.TrimToJsonObject(raw!));
-    }
-
-    [Fact]
-    public void TrimToJsonObject_NoBraces_PassesThroughForUpstreamError()
-    {
-        // No `{` or `[` — return as-is so the JSON parser (or empty-
-        // response guard) surfaces the actual problem rather than this
-        // helper silently swallowing it.
-        const string raw = "Claude returned only prose, no JSON at all.";
-        Assert.Equal(raw, DocumentGenerateService.TrimToJsonObject(raw));
-    }
-
-    [Fact]
-    public void ParseAgentJson_ProsePreambleAroundJson_ParsesCleanly()
-    {
-        // End-to-end check: ParseAgentJson must survive a Claude reply
-        // that wraps a valid JSON object in conversational prose. The
-        // existing code-fence + new prose-trim path collapse to the
-        // object before deserialisation.
-        const string raw =
-            "All data has been collected. Here is the JSON:\n\n"
-            + "```json\n"
-            + "{ \"organisation\": { \"environmentName\": \"Contoso\" }, \"tables\": [], \"keyObservations\": [] }\n"
-            + "```\n\n"
-            + "Let me know if you need more detail.";
-        var parsed = DocumentGenerateService.ParseAgentJson(raw);
-        Assert.NotNull(parsed);
-        Assert.Equal("Contoso", parsed.Organisation?.EnvironmentName);
-    }
-
-    // E2E hotfix 2026-05-14 — pin the runtime hypothesis that drove the
-    // RateLimitsExceeded catch reordering in `RunAsync`. The Anthropic SDK
-    // makes `RateLimitsExceeded` derive from
-    // `System.Net.Http.HttpRequestException`; if a future SDK upgrade
-    // flips the base class, the network-fault filter no longer captures
-    // rate-limit 429s and the catch ordering can be reconsidered. This
-    // assertion is the single source of truth for the ordering invariant.
-    [Fact]
-    public void RateLimitsExceeded_DerivesFromHttpRequestException_PinsCatchOrdering()
-    {
-        Assert.True(
-            typeof(Anthropic.SDK.RateLimitsExceeded).IsSubclassOf(typeof(System.Net.Http.HttpRequestException)),
-            "Catch ordering in DocumentGenerateService.RunAsync depends on this hierarchy — "
-            + "if RateLimitsExceeded no longer derives from HttpRequestException, the dedicated "
-            + "Anthropic catch can be moved back below the network-fault filter without misclassification.");
-    }
-
-    // E2E hotfix 2026-05-14 — `TruncateForLog` bounds the forensic dump
-    // emitted when a Mode 1 JSON parse fails. Pin the head/tail/elision
-    // contract so a future "let's just log the whole response" regression
-    // is caught.
-    [Theory]
-    [InlineData(null,       "(empty)")]
-    [InlineData("",         "(empty)")]
-    [InlineData("short",    "short")]
-    public void TruncateForLog_SmallOrEmptyInput_PassesThrough(string? raw, string expected)
-    {
-        Assert.Equal(expected, DocumentGenerateService.TruncateForLog(raw, headChars: 5, tailChars: 5));
-    }
-
-    [Fact]
-    public void TruncateForLog_LongInput_EmitsHeadAndTailWithElisionMarker()
-    {
-        var raw = new string('a', 100) + new string('b', 200) + new string('c', 100);
-        var result = DocumentGenerateService.TruncateForLog(raw, headChars: 50, tailChars: 50);
-
-        Assert.StartsWith(new string('a', 50), result);
-        Assert.EndsWith(new string('c', 50),   result);
-        // 400 - 50 - 50 = 300 chars elided.
-        Assert.Contains("[300 chars elided]", result);
-        // Total log line bounded: head + tail + elision marker — no quadratic blow-up.
-        Assert.True(result.Length < raw.Length);
-    }
-
-    // Story 3.7 code-review P9 — a Claude response with a wrong-shape
-    // `applicationUsers` value (object / string instead of array) falls
-    // outside the AC-11 defence-in-depth contract: the missing-key path is
-    // explicitly tolerated, but a wrong-shape value still raises AI_ERROR
-    // (the safe-coalesce can only normalise NULL or array shapes — there is
-    // no semantically-correct fallback for "applicationUsers" returned as a
-    // string). Test pins the expected AI_ERROR behaviour so a future
-    // tolerant converter is an intentional design move rather than a silent
-    // regression of the parser strictness.
-    [Theory]
-    [InlineData("""{ "applicationUsers": "not-an-array" }""")]
-    [InlineData("""{ "applicationUsers": 42 }""")]
-    [InlineData("""{ "applicationUsers": { "displayName": "x" } }""")]
-    public void ParseAgentJson_WrongShapeApplicationUsersKey_RaisesAiError(string raw)
-    {
-        var ex = Assert.Throws<GenerationFailureException>(
-            () => DocumentGenerateService.ParseAgentJson(raw));
-        Assert.Equal(JobFailureCodes.AiError, ex.Code);
-    }
-
-    // Story 3.7 — null entry inside the applicationUsers array (analogous to
-    // the Story 3.6 P13 tables-null filter). The service strips nulls before
-    // the renderer touches the list.
-    [Fact]
-    public void ParseAgentJson_NullApplicationUserEntry_SurvivesAndIsFilteredAtServiceBoundary()
-    {
-        const string raw = """
-            {
-              "applicationUsers": [
-                null,
-                { "displayName": "Sync App", "applicationId": "11111111-1111-1111-1111-111111111111",
-                  "roles": ["Reader"] }
-              ]
-            }
-            """;
-
-        var parsed = DocumentGenerateService.ParseAgentJson(raw);
-        Assert.NotNull(parsed.ApplicationUsers);
-        var filtered = parsed.ApplicationUsers!.Where(u => u is not null).ToList();
-
-        Assert.Single(filtered);
-        Assert.Equal("Sync App", filtered[0].DisplayName);
-        Assert.Equal(new[] { "Reader" }, filtered[0].Roles);
-    }
-
-    // Story 3.6 code-review P13 — JSON `tables: [null, {...}]` is a real
-    // possibility from a flaky agent payload. ParseAgentJson deserialises
-    // the null as a real element; the service-level filter removes it before
-    // the analyzer (and the downstream model consumers) see it.
-    [Fact]
-    public void ParseAgentJson_NullTableEntry_SurvivesAndIsFilteredAtServiceBoundary()
-    {
-        const string raw = """
-            {
-              "tables": [
-                null,
-                { "logicalName": "vel_account" }
-              ]
-            }
-            """;
-
-        var parsed = DocumentGenerateService.ParseAgentJson(raw);
-        Assert.NotNull(parsed.Tables);
-        // The service strips nulls before invoking PrefixAnalyzer / DocxBuilder.
-        var filtered = parsed.Tables!.Where(t => t is not null).ToList();
-        var summary  = PrefixAnalyzer.Analyze(filtered);
-
-        Assert.Single(filtered);
-        Assert.Equal("vel", summary.PrimaryClientPrefix);
-    }
-
-    // ── Story 4.1 — schema gate wired into the pipeline (AC-4, AC-5, AC-6) ────────
-
-    // Golden Epic-3-shape response that satisfies the transitional contract; used to
-    // prove the gate lets valid output through to DocxBuilder + the document store.
-    private const string ValidEpic3Response = """
+        var repository = new DirectoryInfo(AppContext.BaseDirectory);
+        while (repository is not null && !File.Exists(Path.Combine(repository.FullName, "DataverseDocAgent.sln"))) repository = repository.Parent;
+        var run = Path.Combine(Path.GetTempPath(), "dda-assembly-" + Guid.NewGuid().ToString("N"));
+        using var ct = new CancellationTokenSource();
+        var store = new CapturingStore();
+        var options = new PipelineOptions { SkillsRoot = Path.Combine(repository!.FullName, ".agents", "skills") };
+        var service = new DocumentGenerateService(null!, new AnalysisPipeline(new AssemblyRunner(cancel ? ct : null), options), options,
+            store, NullLogger<DocumentGenerateService>.Instance);
+        try
         {
-          "organisation": { "environmentName": "Contoso", "environmentUrl": null,
-            "version": "9.2", "baseLanguageName": "English" },
-          "tables": [ { "logicalName": "vel_account" } ],
-          "fields": {},
-          "relationships": {},
-          "applicationUsers": [],
-          "keyObservations": ["one", "two", "three"]
+            if (cancel)
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.ProcessSnapshotAsync(Snapshot(), run, ct.Token));
+                Assert.Null(store.Bytes);
+            }
+            else
+            {
+                Assert.Equal("stored", await service.ProcessSnapshotAsync(Snapshot(), run, ct.Token));
+                Assert.NotNull(store.Bytes);
+                using var stream = new MemoryStream(store.Bytes!);
+                using var doc = WordprocessingDocument.Open(stream, false);
+                Assert.Contains("Original SDK description", doc.MainDocumentPart!.Document!.InnerText);
+                Assert.Contains("AI inference:", doc.MainDocumentPart.Document.InnerText);
+                var errors = new DocumentFormat.OpenXml.Validation.OpenXmlValidator().Validate(doc).ToArray();
+                Assert.True(errors.Length == 0, string.Join("\n", errors.Select(e => e.Description + " " + e.Path?.XPath)));
+            }
+            var persisted = await SnapshotStore.LoadAsync(Path.Combine(run, "evidence"));
+            Assert.Equal(Snapshot().Components.Count, persisted.Components.Count);
         }
-        """;
-
-    private static DocumentGenerateService BuildServiceWithSpyStore(out SpyDocumentStore store)
-    {
-        store = new SpyDocumentStore();
-        return new DocumentGenerateService(
-            connectionFactory: null!,          // unused by ProcessAgentResponseAsync
-            orchestratorFactory: () => null!,  // unused by ProcessAgentResponseAsync
-            documentStore: store,
-            // Shared singleton — JsonSchema.Net forbids re-registering the same $id from a
-            // second instance (production uses a DI singleton; see OutputSchemaValidatorTests).
-            schemaValidator: OutputSchemaValidatorTests.SharedValidator,
-            logger: NullLogger<DocumentGenerateService>.Instance);
+        finally { if (Directory.Exists(run)) Directory.Delete(run, true); }
     }
 
-    [Fact]
-    public async Task ProcessAgentResponse_SchemaInvalidJson_ThrowsOutputSchemaViolation_AndStoreNeverCalled()
+    private sealed class AssemblyRunner(CancellationTokenSource? cancel) : IAnalysisRunner
     {
-        // Valid JSON, but missing required transitional keys → schema violation.
-        const string invalid = """{ "organisation": { "environmentName": "x" } }""";
-        var service = BuildServiceWithSpyStore(out var store);
-
-        var ex = await Assert.ThrowsAsync<GenerationFailureException>(
-            () => service.ProcessAgentResponseAsync(invalid, "https://x.crm.dynamics.com", CancellationToken.None));
-
-        Assert.Equal(JobFailureCodes.OutputSchemaViolation, ex.Code);
-        Assert.Equal("OUTPUT_SCHEMA_VIOLATION", ex.Code);
-        Assert.True(ex.SafeToRetry);
-        // AC-6 proxy — DocxBuilder.Build is static; the document store is the observable
-        // downstream boundary. A schema violation must reach neither.
-        Assert.Equal(0, store.StoreCallCount);
-    }
-
-    [Fact]
-    public async Task ProcessAgentResponse_SchemaInvalidJson_DoesNotLeakInstanceValuesToClientMessage()
-    {
-        // NFR-007 — the fixed exception message must not echo the offending output.
-        const string invalid = """{ "organisation": { "environmentName": "SECRET_ENV_NAME" }, "leak_key": "SECRET_LEAK" }""";
-        var service = BuildServiceWithSpyStore(out _);
-
-        var ex = await Assert.ThrowsAsync<GenerationFailureException>(
-            () => service.ProcessAgentResponseAsync(invalid, "https://x.crm.dynamics.com", CancellationToken.None));
-
-        Assert.Equal(JobFailureCodes.OutputSchemaViolation, ex.Code);
-        Assert.DoesNotContain("SECRET_ENV_NAME", ex.Message);
-        Assert.DoesNotContain("SECRET_LEAK", ex.Message);
-    }
-
-    [Fact]
-    public async Task ProcessAgentResponse_ValidEpic3Response_PassesGate_AndStoresDocument()
-    {
-        var service = BuildServiceWithSpyStore(out var store);
-
-        var token = await service.ProcessAgentResponseAsync(
-            ValidEpic3Response, "https://x.crm.dynamics.com", CancellationToken.None);
-
-        Assert.Equal("spy-token", token);
-        Assert.Equal(1, store.StoreCallCount);
-    }
-
-    [Fact]
-    public async Task ProcessAgentResponse_NonJsonResponse_StillRaisesAiError_GateIsDefenceInDepth()
-    {
-        // Dev Notes — the gate skips non-JSON input the trim helpers cannot rescue; the
-        // existing ParseAgentJson JsonException fallback (AI_ERROR) must still fire.
-        var service = BuildServiceWithSpyStore(out var store);
-
-        var ex = await Assert.ThrowsAsync<GenerationFailureException>(
-            () => service.ProcessAgentResponseAsync("Claude returned only prose, no JSON.",
-                "https://x.crm.dynamics.com", CancellationToken.None));
-
-        Assert.Equal(JobFailureCodes.AiError, ex.Code);
-        Assert.Equal(0, store.StoreCallCount);
-    }
-
-    [Fact]
-    public async Task ProcessAgentResponse_MaxIterationsSentinel_RaisesAiError_BeforeGate()
-    {
-        var service = BuildServiceWithSpyStore(out var store);
-
-        var ex = await Assert.ThrowsAsync<GenerationFailureException>(
-            () => service.ProcessAgentResponseAsync(AgentOrchestrator.MaxIterationsSentinel,
-                "https://x.crm.dynamics.com", CancellationToken.None));
-
-        Assert.Equal(JobFailureCodes.AiError, ex.Code);
-        Assert.Equal(0, store.StoreCallCount);
-    }
-
-    [Fact]
-    public async Task ProcessAgentResponse_NullLiteralResponse_ThrowsOutputSchemaViolation()
-    {
-        // Review 4.1 P2 — a bare JSON `null` literal is VALID JSON that the schema
-        // must reject (type != object). Before the patch, JsonNode.Parse("null")
-        // returning a null reference was conflated with a parse failure and the gate
-        // was silently skipped (surfacing later as AI_ERROR). Pin the gate running.
-        var service = BuildServiceWithSpyStore(out var store);
-
-        var ex = await Assert.ThrowsAsync<GenerationFailureException>(
-            () => service.ProcessAgentResponseAsync("null",
-                "https://x.crm.dynamics.com", CancellationToken.None));
-
-        Assert.Equal(JobFailureCodes.OutputSchemaViolation, ex.Code);
-        Assert.True(ex.SafeToRetry);
-        Assert.Equal(0, store.StoreCallCount);
-    }
-
-    [Fact]
-    public async Task ProcessAgentResponse_SchemaViolation_LoggedPathsContainNoInstanceValues()
-    {
-        // Review 4.1 P3 — the exception-message leak test alone is tautological (the
-        // message is a hardcoded constant). This test captures the ACTUAL logged
-        // warning and asserts the failure-path line carries schema keywords/pointers
-        // but never instance VALUES (NFR-007). Positive anchor: the schema-validation
-        // warning must have been logged at all.
-        const string invalid = """
-            { "organisation": { "environmentName": "SENTINEL_VALUE_AAA" },
-              "drift_key": "SENTINEL_VALUE_BBB" }
-            """;
-        var store  = new SpyDocumentStore();
-        var logger = new CapturingLogger<DocumentGenerateService>();
-        var service = new DocumentGenerateService(
-            connectionFactory: null!,
-            orchestratorFactory: () => null!,
-            documentStore: store,
-            schemaValidator: OutputSchemaValidatorTests.SharedValidator,
-            logger: logger);
-
-        var ex = await Assert.ThrowsAsync<GenerationFailureException>(
-            () => service.ProcessAgentResponseAsync(invalid, "https://x.crm.dynamics.com", CancellationToken.None));
-
-        Assert.Equal(JobFailureCodes.OutputSchemaViolation, ex.Code);
-        // Positive anchor — the schema-validation warning was logged.
-        var schemaLog = Assert.Single(
-            logger.Messages.Where(m => m.Contains("failed schema validation")));
-        // NFR-007 — instance VALUES never appear in the logged detail.
-        Assert.DoesNotContain("SENTINEL_VALUE_AAA", schemaLog);
-        Assert.DoesNotContain("SENTINEL_VALUE_BBB", schemaLog);
-    }
-
-    private sealed class CapturingLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
-    {
-        public List<string> Messages { get; } = new();
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
-
-        public void Log<TState>(
-            Microsoft.Extensions.Logging.LogLevel logLevel,
-            Microsoft.Extensions.Logging.EventId eventId,
-            TState state,
-            Exception? exception,
-            Func<TState, Exception?, string> formatter)
-            => Messages.Add(formatter(state, exception));
-    }
-
-    private sealed class SpyDocumentStore : IDocumentStore
-    {
-        public int StoreCallCount { get; private set; }
-
-        public Task<string> StoreAsync(byte[] documentBytes, TimeSpan ttl)
+        public async Task<string> RunAsync(AnalysisRequest request, CancellationToken cancellationToken = default)
         {
-            StoreCallCount++;
-            return Task.FromResult("spy-token");
+            using var input = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(request.WorkingDirectory, "input.json"), cancellationToken));
+            var root = input.RootElement;
+            var ids = root.GetProperty("targets").EnumerateArray().Select(t => t.GetProperty("id").GetString()!).ToArray();
+            cancel?.Cancel();
+            return JsonSerializer.Serialize(new StageAnalysis(1, root.GetProperty("stageId").GetString()!, root.GetProperty("skillVersion").GetString()!,
+                root.GetProperty("inputHash").GetString()!, ids, ids.Select(id => new AnalysisFinding(id, id, "inference", "Purpose is uncertain.")).ToArray(),
+                Array.Empty<string>()), new JsonSerializerOptions(JsonSerializerDefaults.Web));
         }
-
-        public Task<byte[]?> RetrieveAsync(string token) => Task.FromResult<byte[]?>(null);
     }
+
+    private sealed class CapturingStore : IDocumentStore
+    {
+        public byte[]? Bytes { get; private set; }
+        public Task<string> StoreAsync(byte[] documentBytes, TimeSpan ttl) { Bytes = documentBytes; return Task.FromResult("stored"); }
+        public Task<byte[]?> RetrieveAsync(string token) => Task.FromResult(Bytes);
+    }
+
+    [Theory]
+    [InlineData("complete", false)]
+    [InlineData("excluded", false)]
+    [InlineData("limitation", false)]
+    [InlineData("partial", true)]
+    [InlineData("failed", true)]
+    [InlineData("unavailable", true)]
+    public void ReportExitClassificationDistinguishesExpectedScopeFromFailure(string status, bool partial)
+    {
+        var snapshot = Snapshot() with { Coverage = new[] { new CoverageEntry("scope", status, "Detail") } };
+        var analysis = new AnalysisReport(new[] { new StageAnalysis(1, "test", "1", "hash", Array.Empty<string>(),
+            Array.Empty<AnalysisFinding>(), Array.Empty<string>()) }, snapshot.Coverage);
+        Assert.Equal(partial, ReportAssembler.HasIncompleteCoverage(snapshot, analysis));
+    }
+
+    [Fact]
+    public void Assembly_RawDescriptionsAndCountsCannotBeReplacedByAnalysis()
+    {
+        var snapshot = Snapshot();
+        var analysis = new AnalysisReport(new[] { new StageAnalysis(1, "table-analysis-000", "1", "hash",
+            new[] { "table:cr_order" }, new[] { new AnalysisFinding("table:cr_order", "field:cr_order:cr_name", "inference", "Likely orders; 900 tables is merely generated prose.") }, Array.Empty<string>()) }, Array.Empty<CoverageEntry>());
+        var model = ReportAssembler.Build(snapshot, analysis);
+        Assert.Equal(1, model.Summary.TableCount);
+        Assert.Equal(1, model.Summary.FieldCount);
+        Assert.Equal(1, model.Summary.RelationshipCount);
+        Assert.Equal("Original SDK description", Assert.Single(model.Tables).Description);
+        Assert.Null(Assert.Single(model.Tables).Purpose);
+        Assert.Equal("Raw field text", Assert.Single(model.Fields["cr_order"]).Description);
+        Assert.Contains("AI inference:", Assert.Single(model.Summary.KeyObservations));
+        Assert.Contains("evidence: field:cr_order:cr_name", Assert.Single(model.Summary.KeyObservations));
+        Assert.Contains(model.Evidence, e => e.RawJson.Contains("referencingAttribute"));
+        Assert.Contains(model.Coverage, c => c.Contains("analysis-missing"));
+    }
+
+    [Fact]
+    public void Assembly_MissingAnalysisAndFailedCollectionAreDisclosedInDocx()
+    {
+        var model = ReportAssembler.Build(Snapshot(), new AnalysisReport(Array.Empty<StageAnalysis>(), Array.Empty<CoverageEntry>()));
+        var bytes = DocxBuilder.Build(model);
+        using var stream = new MemoryStream(bytes);
+        using var doc = WordprocessingDocument.Open(stream, false);
+        var text = doc.MainDocumentPart!.Document!.InnerText;
+        Assert.Contains("No validated analysis was produced", text);
+        Assert.Contains("application-users: failed", text);
+        Assert.Contains("See collection coverage", text);
+        Assert.DoesNotContain("No application users registered", text);
+        Assert.DoesNotContain("No third-party ISV components detected", text);
+        Assert.Contains("Publisher ownership is unknown", text);
+        Assert.Contains("Original SDK description", text);
+        Assert.Contains("relationship:cr_order_parent", text);
+    }
+
+    [Fact]
+    public void Assembly_RejectsReferencesOutsideEvidence()
+    {
+        var analysis = new AnalysisReport(new[] { new StageAnalysis(1, "tables", "1", "hash", new[] { "table:cr_order" },
+            new[] { new AnalysisFinding("table:cr_order", "table:invented", "inference", "Unsupported") }, Array.Empty<string>()) }, Array.Empty<CoverageEntry>());
+        Assert.Throws<InvalidDataException>(() => ReportAssembler.Build(Snapshot(), analysis));
+    }
+
+    [Fact]
+    public async Task ConnectionFailure_ReleasesCredentialsAndDoesNotExposeSdkMessage()
+    {
+        var task = new GenerationTask("job", new EnvironmentCredentials
+        {
+            EnvironmentUrl = "https://example.crm.dynamics.com", TenantId = "tenant", ClientId = "client", ClientSecret = "sentinel-secret"
+        });
+        var service = new DocumentGenerateService(new RejectConnection(), null!, null!, null!, NullLogger<DocumentGenerateService>.Instance);
+        var error = await Assert.ThrowsAsync<GenerationFailureException>(() => service.RunAsync(task, CancellationToken.None));
+        Assert.Equal(JobFailureCodes.CredentialRejected, error.Code);
+        Assert.DoesNotContain("sentinel-secret", error.ToString());
+        Assert.Throws<InvalidOperationException>(() => task.Credentials);
+    }
+
+    private sealed class RejectConnection : IDataverseConnectionFactory
+    {
+        public Task<ServiceClient> ConnectAsync(EnvironmentCredentials credentials, CancellationToken cancellationToken = default)
+            => throw new DataverseConnectionException("SDK sentinel-secret");
+    }
+
+    internal static EvidenceSnapshot Snapshot() => new(1, "fixture", DateTime.UnixEpoch,
+        new[]
+        {
+            Component("organisation", "organisation", null, new { environmentName = "Fixture", environmentUrl = "https://example.invalid", version = "9" }),
+            Component("table:cr_order", "table", null, new { logicalName = "cr_order", description = "Original SDK description" }),
+            Component("field:cr_order:cr_name", "field", "table:cr_order", new { logicalName = "cr_name", description = "Raw field text" }),
+            Component("relationship:cr_order_parent", "relationship", "table:cr_order", new { schemaName = "cr_order_parent", relationshipType = "OneToMany", relatedEntity = "cr_parent", referencedEntity = "cr_parent", referencingEntity = "cr_order", referencingAttribute = "cr_parentid" })
+        }, new[] { new CoverageEntry("application-users", "failed", "Read access unavailable.") });
+    private static EvidenceComponent Component(string id, string kind, string? parent, object data)
+        => new(id, kind, parent, JsonSerializer.SerializeToElement(data));
 }

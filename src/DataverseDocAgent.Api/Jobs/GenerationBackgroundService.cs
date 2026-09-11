@@ -146,6 +146,12 @@ public sealed class GenerationBackgroundService : BackgroundService
     private static string SanitisedClientMessage(string code) => code switch
     {
         JobFailureCodes.CredentialRejected => "Credentials were rejected by the target environment.",
+        "PERMISSION_DENIED" => "Required Dataverse read permissions are missing.",
+        "login_required" => "Log in to Codex with ChatGPT using the service operating-system account.",
+        "configuration" => "Local Codex configuration is unavailable or invalid.",
+        "usage_limit" => "The Codex usage limit was reached.",
+        "invalid_output" => "Local analysis did not satisfy the evidence contract.",
+        "timeout" => "A local Codex analysis stage timed out.",
         JobFailureCodes.DataverseError     => "The target environment returned an error.",
         JobFailureCodes.AiError            => "Document generation failed during AI orchestration.",
         JobFailureCodes.GenerationTimeout  => "Generation exceeded the configured timeout.",

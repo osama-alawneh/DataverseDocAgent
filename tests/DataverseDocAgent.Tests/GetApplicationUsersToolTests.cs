@@ -84,6 +84,7 @@ public class GetApplicationUsersToolTests
         Assert.Equal(2, users.GetArrayLength());
 
         var u0 = users[0];
+        Assert.Equal(userId1.ToString(), u0.GetProperty("systemUserId").GetString());
         Assert.Equal("Integration Sync",                   u0.GetProperty("displayName").GetString());
         Assert.Equal(appId1.ToString(),                    u0.GetProperty("applicationId").GetString());
         Assert.Equal("sync@contoso.onmicrosoft.com",       u0.GetProperty("email").GetString());

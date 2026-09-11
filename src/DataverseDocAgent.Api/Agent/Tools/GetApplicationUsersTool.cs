@@ -123,6 +123,7 @@ public sealed class GetApplicationUsersTool : IDataverseTool
         // `internalemailaddress`) per AC-3.
         var dto = new ApplicationUserDto
         {
+            SystemUserId  = user.Id == Guid.Empty ? null : user.Id.ToString(),
             DisplayName   = user.GetAttributeValue<string?>("fullname"),
             ApplicationId = ExtractApplicationId(user),
             Email         = NullIfBlank(user.GetAttributeValue<string?>("internalemailaddress")),
@@ -216,6 +217,7 @@ public sealed class GetApplicationUsersTool : IDataverseTool
 
     private sealed class ApplicationUserDto
     {
+        public string?               SystemUserId  { get; set; }
         public string?               DisplayName   { get; set; }
         public string?               ApplicationId { get; set; }
         public string?               Email         { get; set; }
